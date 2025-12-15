@@ -6,22 +6,22 @@ version      = "0.1.0"
 
 [[bin]]
 name = "blejoystick-rs"
-path = "./src/bin/main.rs"
+path = "./src/main.rs"
 
 # based on https://github.com/embassy-rs/trouble/blob/main/examples/esp32/Cargo.toml
 
 [dependencies]
 defmt = { version = "1.0.1", optional = true }
-log = "0.4"
+log = { version = "0.4", optional = true }
+esp-backtrace = { version = "0.18.0", features = [ "panic-handler" ] }
 
 embassy-executor = "0.9.1"
 esp-bootloader-esp-idf = "0.4.0"
-esp-backtrace = { version = "0.18.1", features = [ "panic-handler", "println" ] }
 esp-hal = { version = "1.0.0", features = [ "unstable" ] }
 esp-alloc = { version = "0.9.0" }
-esp-println = { version = "0.16.0", features = ["log-04"] }
-esp-radio = { version = "0.17.0", features = ["ble", "log-04", "unstable"] }
-esp-rtos = { version = "0.2.0", features = ["embassy", "esp-alloc", "esp-radio", "log-04"] }
+esp-println = { version = "0.16.0" }
+esp-radio = { version = "0.17.0", features = ["ble", "unstable"] }
+esp-rtos = { version = "0.2.0", features = ["embassy", "esp-alloc", "esp-radio"] }
 trouble-host = { version = "0.5.1", features = ["default-packet-pool-mtu-255"] }
 
 # for BLE 'security' feature
@@ -43,19 +43,34 @@ esp-storage = { version = "0.8.1" }
 # peripherals
 embedded-hal-nb = "1.0.0"
 
+
+# embedded-io = { version = "0.6.1", features = ["defmt-03"] }
+# embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
+
 [features]
-default = ["esp32c3", "security"]
+default = ["esp32c3", "security", "defmt"]
 
 esp32c3 = ["esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-println/esp32c3", "esp-radio/esp32c3", "esp-rtos/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3"]
 
-# TODO robustly handle lack of defmt
 defmt = [
     "dep:defmt",
+    "esp-backtrace/defmt", 
+    "esp-alloc/defmt",
+    "esp-hal/defmt",
+    "esp-println/defmt-espflash", 
+    "embassy-executor/defmt",
+    "embassy-time/defmt",
     "trouble-host/defmt",
     "bt-hci/defmt",
-    #"embedded-io/defmt-03",
-    #"embedded-hal/defmt-03"
 ]
+log = [
+    "dep:log",
+    "esp-backtrace/println",
+    "esp-println/log-04", 
+    "esp-radio/log-04",
+    "esp-rtos/log-04",
+]
+
 security = [
     "trouble-host/security",
     "dep:sequential-storage",
