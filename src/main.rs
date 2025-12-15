@@ -17,6 +17,7 @@ use {esp_backtrace as _, esp_println as _};
 mod ble_peripheral;
 
 
+// TrouBLE example imports
 use embassy_executor::Spawner;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
