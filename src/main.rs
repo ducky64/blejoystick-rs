@@ -19,10 +19,11 @@ mod ble_peripheral;
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
-use esp_hal::clock::CpuClock;
+use esp_hal::{Blocking, analog::adc::{AdcChannel, AdcPin}, clock::CpuClock, gpio::{AnalogPin, AnyPin}, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::ble::controller::BleConnector;
 use trouble_host::prelude::ExternalController;
+use trouble_host::prelude::*;
 use esp_backtrace as _;
 
 // BAS bonding imports
@@ -33,7 +34,7 @@ use esp_storage::FlashStorage;
 use embedded_hal_nb::nb;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig},
+    gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig, Pin},
     analog::adc::{AdcConfig, Adc, Attenuation},
 };
 
@@ -62,8 +63,8 @@ async fn main(spawner: Spawner) {
         software_interrupt.software_interrupt0,
     );
 
-    let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
-    let mut rng = Trng::try_new().unwrap();
+    // let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
+    // let mut rng = Trng::try_new().unwrap();
     // let mut rng = Rng::new();
 
     let radio = esp_radio::init().unwrap();
@@ -74,10 +75,7 @@ async fn main(spawner: Spawner) {
     // Initialize the flash
     let mut flash = embassy_embedded_hal::adapter::BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
 
-    ble_peripheral::run(controller, &mut rng, &mut flash).await;
-
-    rng.downgrade();
-    core::mem::drop(_trng_source);  // drop the Trng to allow ADC1 t obe used
+    ble_peripheral::run(controller, &mut flash);  // .await;
 
     // App-specific code starts here
     info!("Quack quack quack world");
@@ -86,29 +84,53 @@ async fn main(spawner: Spawner) {
     let button = Input::new(peripherals.GPIO6, InputConfig::default().with_pull(Pull::Up));
 
     let mut adc_config = AdcConfig::new();
-    let mut joystick_x_pin = adc_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
-    let mut joystick_y_pin = adc_config.enable_pin(peripherals.GPIO3, Attenuation::_11dB);
-    let mut trig_pin = adc_config.enable_pin(peripherals.GPIO1, Attenuation::_11dB);
-    let mut vbat_pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
+    let x_pin = adc_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
+    let y_pin = adc_config.enable_pin(peripherals.GPIO3, Attenuation::_11dB);
+    let trig_pin = adc_config.enable_pin(peripherals.GPIO1, Attenuation::_11dB);
+    let vbat_pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
     let mut adc = Adc::new(peripherals.ADC1, adc_config);
 
-
     spawner.spawn(blinky(led, button)).ok();
+    spawner.spawn(read_ui(adc, x_pin, y_pin, trig_pin)).ok();
+    // spawner.spawn(read_bat(adc, vbat_pin)).ok();
 
     loop {
-        let joystick_x_value = nb::block!(adc.read_oneshot(&mut joystick_x_pin)).unwrap();
-        let joystick_y_value = nb::block!(adc.read_oneshot(&mut joystick_y_pin)).unwrap();
+        Timer::after(Duration::from_millis(1000)).await;
+    }
+}
+
+
+// the ADC API seems to be a bit of a dumpster fire
+// https://github.com/esp-rs/esp-hal/issues/449
+// such that it was removed int he embedded hal 1.0 API
+// https://github.com/rust-embedded/embedded-hal/pull/376
+// so for now, the GPIO # is hardcoded instead of generic, yuck!
+#[embassy_executor::task]
+async fn read_ui(mut adc: Adc<'static, ADC1<'static>, Blocking>, 
+        mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
+        mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
+    loop {
+        let joystick_x_value = nb::block!(adc.read_oneshot(&mut x_pin)).unwrap();
+        let joystick_y_value = nb::block!(adc.read_oneshot(&mut y_pin)).unwrap();
         let trig_value = nb::block!(adc.read_oneshot(&mut trig_pin)).unwrap();
-        let vbat_value = nb::block!(adc.read_oneshot(&mut vbat_pin)).unwrap();
-        info!("JX {}    JY {}    Tr {}    VB {}",
+        info!("JX {}    JY {}    Tr {}",
             joystick_x_value,
             joystick_y_value,
-            trig_value,
-            vbat_value);
+            trig_value);
         Timer::after(Duration::from_millis(100)).await;
     }
 }
 
+// #[embassy_executor::task]
+// async fn read_bat(mut adc: Adc<'static, ADC1<'static>, Blocking>, 
+//         mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
+//     loop {
+//         let vbat_value = nb::block!(adc.read_oneshot(&mut vbat_pin)).unwrap();
+//         info!("VB {}",
+//             vbat_value);
+//         Timer::after(Duration::from_millis(100)).await;
+//     }
+// }
 
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>, button: Input<'static>) {
