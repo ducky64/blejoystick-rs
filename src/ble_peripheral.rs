@@ -8,9 +8,9 @@ use sequential_storage::map::{Key, SerializationError, Value};
 use trouble_host::prelude::*;
 
 #[cfg(feature = "defmt")]
-use defmt::{info, warn, error};
+use defmt::{debug, info, warn, error};
 #[cfg(feature = "log")]
-use log::{info, warn, error};
+use log::{debug, info, warn, error};
 
 
 /// Max number of connections
@@ -369,14 +369,14 @@ async fn custom_task<C: Controller, P: PacketPool>(
     let level = server.battery_service.level;
     loop {
         tick = tick.wrapping_add(1);
-        info!("[custom_task] notifying connection of tick {}", tick);
+        debug!("[custom_task] notifying connection of tick {}", tick);
         if level.notify(conn, &tick).await.is_err() {
             info!("[custom_task] error notifying connection");
             break;
         };
         // read RSSI (Received Signal Strength Indicator) of the connection.
         if let Ok(rssi) = conn.raw().rssi(stack).await {
-            info!("[custom_task] RSSI: {:?}", rssi);
+            debug!("[custom_task] RSSI: {:?}", rssi);
         } else {
             info!("[custom_task] error getting RSSI");
             break;
