@@ -125,24 +125,22 @@ impl<'a> Value<'a> for StoredBondInformation {
 }
 
 fn flash_range<S: NorFlash>() -> Range<u32> {
-    0..2 * S::ERASE_SIZE as u32
+    let start_addr = 0x10_0000;
+    start_addr..(start_addr + 8 * S::ERASE_SIZE as u32)
 }
 
 async fn store_bonding_info<S: NorFlash>(
     storage: &mut S,
     info: &BondInformation,
 ) -> Result<(), sequential_storage::Error<S::Error>> {
-    // Use flash range from 640KB, should be good for both ESP32 & nRF52840 examples
-    let start_addr = 0xA0000 as u32;
-    let storage_range = start_addr..(start_addr + 8 * S::ERASE_SIZE as u32);
-    sequential_storage::erase_all(storage, storage_range.clone()).await?;
+    sequential_storage::erase_all(storage, flash_range::<S>()).await?;
     let mut buffer = [0; 32];
     let key = StoredAddr(info.identity.bd_addr);
     let value = StoredBondInformation {
         ltk: info.ltk,
         security_level: info.security_level,
     };
-    sequential_storage::map::store_item(storage, storage_range, &mut NoCache::new(), &mut buffer, &key, &value).await?;
+    sequential_storage::map::store_item(storage, flash_range::<S>(), &mut NoCache::new(), &mut buffer, &key, &value).await?;
     Ok(())
 }
 
@@ -200,7 +198,7 @@ where
     S: NorFlash,
 {
     let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
-        info!("Loaded bond information");
+        info!("Loaded bond information: {}", bond_info);
         stack.add_bond_information(bond_info).unwrap();
         true
     } else {
@@ -289,7 +287,7 @@ async fn gatt_events_task<S: NorFlash>(
                 if let Some(bond) = bond {
                     store_bonding_info(storage, &bond).await.unwrap();
                     *bond_stored = true;
-                    info!("Bond information stored");
+                    info!("Bond information stored: {}", bond);
                 }
             }
             #[cfg(feature = "security")]
@@ -388,9 +386,10 @@ async fn custom_task<C: Controller, P: PacketPool>(
     stack: &Stack<'_, C, P>,
 ) {
     let mut tick: u8 = 0;
+    
     let level = server.battery_service.level;
     loop {
-        tick = tick.wrapping_add(1);
+        // tick = tick.wrapping_add(1);
         debug!("[custom_task] notifying connection of tick {}", tick);
         if level.notify(conn, &tick).await.is_err() {
             info!("[custom_task] error notifying connection");
@@ -399,6 +398,7 @@ async fn custom_task<C: Controller, P: PacketPool>(
         // read RSSI (Received Signal Strength Indicator) of the connection.
         if let Ok(rssi) = conn.raw().rssi(stack).await {
             debug!("[custom_task] RSSI: {:?}", rssi);
+            tick = rssi.abs() as u8;
         } else {
             info!("[custom_task] error getting RSSI");
             break;
