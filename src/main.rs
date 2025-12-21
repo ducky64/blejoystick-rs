@@ -24,11 +24,10 @@ mod ble_peripheral;
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
-use esp_hal::{Blocking, analog::adc::{AdcChannel, AdcPin}, clock::CpuClock, gpio::{AnalogPin, AnyPin}, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
+use esp_hal::{Blocking, analog::adc::{AdcPin}, clock::CpuClock, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::ble::controller::BleConnector;
 use trouble_host::prelude::ExternalController;
-use trouble_host::prelude::*;
 use esp_backtrace as _;
 
 // BAS bonding imports
@@ -39,7 +38,7 @@ use esp_storage::FlashStorage;
 use embedded_hal_nb::nb;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig, Pin},
+    gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig},
     analog::adc::{AdcConfig, Adc, Attenuation},
 };
 
@@ -71,21 +70,19 @@ async fn main(spawner: Spawner) {
         software_interrupt.software_interrupt0,
     );
 
-
+    // initialize BLE
     let radio = esp_radio::init().unwrap();
     let bluetooth = peripherals.BT;
     let connector = BleConnector::new(&radio, bluetooth, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
-
-    // Initialize the flash
     let mut flash = embassy_embedded_hal::adapter::BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
-
     let stack = {
         let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
         let mut trng = Trng::try_new().unwrap();
         ble_peripheral::build_stack(controller, &mut trng)
     };
 
+    // initialize IO
     let led = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
     let button = Input::new(peripherals.GPIO6, InputConfig::default().with_pull(Pull::Up));
 
@@ -98,10 +95,10 @@ async fn main(spawner: Spawner) {
     let adc = Adc::new(peripherals.ADC1, adc_config);
     let adc_mutex = ADC_MUTEX.init(Mutex::new(adc.into()));
 
-    // TODO run BLE peripheral here
-    spawner.spawn(blinky(led, button)).ok();
-    spawner.spawn(read_ui(adc_mutex, x_pin, y_pin, trig_pin)).ok();
-    spawner.spawn(read_bat(adc_mutex, vbat_pin)).ok();
+    // build and run tasks
+    spawner.must_spawn(blinky(led, button));
+    spawner.must_spawn(read_ui(adc_mutex, x_pin, y_pin, trig_pin));
+    spawner.must_spawn(read_bat(adc_mutex, vbat_pin));
 
     ble_peripheral::run(&stack, &mut flash).await;
 }
