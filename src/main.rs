@@ -6,10 +6,15 @@
     holding buffers for the duration of a data transfer."
 )]
 
+use core::cell::RefCell;
+
 #[cfg(feature = "defmt")]
 use defmt::{info, warn, error};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 #[cfg(feature = "log")]
 use log::{info, warn, error};
+use static_cell::StaticCell;
 
 use {esp_backtrace as _, esp_println as _};
 
@@ -45,6 +50,9 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 
+static ADC_MUTEX: StaticCell<Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>> = StaticCell::new();
+
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     // based on examples from https://github.com/embassy-rs/trouble/tree/main/examples/esp32
@@ -63,9 +71,6 @@ async fn main(spawner: Spawner) {
         software_interrupt.software_interrupt0,
     );
 
-    // let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
-    // let mut rng = Trng::try_new().unwrap();
-    // let mut rng = Rng::new();
 
     let radio = esp_radio::init().unwrap();
     let bluetooth = peripherals.BT;
@@ -75,7 +80,30 @@ async fn main(spawner: Spawner) {
     // Initialize the flash
     let mut flash = embassy_embedded_hal::adapter::BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
 
-    ble_peripheral::run(controller, &mut flash);  // .await;
+    // ==== BLE INIT CODE BELOW TODO REFACTOR OUt ====
+
+    /// Max number of connections
+    const CONNECTIONS_MAX: usize = 1;
+
+    /// Max number of L2CAP channels.
+    const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
+
+
+    // Using a fixed "random" address can be useful for testing. In real scenarios, one would
+    // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
+    let address: Address = Address::random([0xff, 0x8f, 0x08, 0x05, 0xe4, 0xff]);
+    info!("Our address = {}", address);
+
+    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> = HostResources::new();
+ 
+    let stack = {
+        let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
+        let mut trng = Trng::try_new().unwrap();
+        
+        trouble_host::new(controller, &mut resources)
+            .set_random_address(address)
+            .set_random_generator_seed(&mut trng)
+    };
 
     // App-specific code starts here
     info!("Quack quack quack world");
@@ -88,11 +116,15 @@ async fn main(spawner: Spawner) {
     let y_pin = adc_config.enable_pin(peripherals.GPIO3, Attenuation::_11dB);
     let trig_pin = adc_config.enable_pin(peripherals.GPIO1, Attenuation::_11dB);
     let vbat_pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
-    let mut adc = Adc::new(peripherals.ADC1, adc_config);
 
+    let mut adc = Adc::new(peripherals.ADC1, adc_config);
+    let adc_mutex = ADC_MUTEX.init(Mutex::new(adc.into()));
+
+    // ble_peripheral::run(controller, peripherals.RNG, adc_mutex, &mut flash);
+    // TODO run BLE peripheral here
     spawner.spawn(blinky(led, button)).ok();
-    spawner.spawn(read_ui(adc, x_pin, y_pin, trig_pin)).ok();
-    // spawner.spawn(read_bat(adc, vbat_pin)).ok();
+    spawner.spawn(read_ui(adc_mutex, x_pin, y_pin, trig_pin)).ok();
+    spawner.spawn(read_bat(adc_mutex, vbat_pin)).ok();
 
     loop {
         Timer::after(Duration::from_millis(1000)).await;
@@ -106,31 +138,35 @@ async fn main(spawner: Spawner) {
 // https://github.com/rust-embedded/embedded-hal/pull/376
 // so for now, the GPIO # is hardcoded instead of generic, yuck!
 #[embassy_executor::task]
-async fn read_ui(mut adc: Adc<'static, ADC1<'static>, Blocking>, 
+async fn read_ui(adc_mutex: &'static Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
         mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
         mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
     loop {
-        let joystick_x_value = nb::block!(adc.read_oneshot(&mut x_pin)).unwrap();
-        let joystick_y_value = nb::block!(adc.read_oneshot(&mut y_pin)).unwrap();
-        let trig_value = nb::block!(adc.read_oneshot(&mut trig_pin)).unwrap();
+        let x_value = adc_mutex.lock(|adc| 
+            nb::block!(adc.borrow_mut().read_oneshot(&mut x_pin)).unwrap());
+        let y_value = adc_mutex.lock(|adc| 
+            nb::block!(adc.borrow_mut().read_oneshot(&mut y_pin)).unwrap());
+        let trig_value = adc_mutex.lock(|adc| 
+            nb::block!(adc.borrow_mut().read_oneshot(&mut trig_pin)).unwrap());
         info!("JX {}    JY {}    Tr {}",
-            joystick_x_value,
-            joystick_y_value,
+            x_value,
+            y_value,
             trig_value);
         Timer::after(Duration::from_millis(100)).await;
     }
 }
 
-// #[embassy_executor::task]
-// async fn read_bat(mut adc: Adc<'static, ADC1<'static>, Blocking>, 
-//         mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
-//     loop {
-//         let vbat_value = nb::block!(adc.read_oneshot(&mut vbat_pin)).unwrap();
-//         info!("VB {}",
-//             vbat_value);
-//         Timer::after(Duration::from_millis(100)).await;
-//     }
-// }
+#[embassy_executor::task]
+async fn read_bat(adc_mutex: &'static Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
+        mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
+    loop {
+        let vbat_value = adc_mutex.lock(|adc| 
+            nb::block!(adc.borrow_mut().read_oneshot(&mut vbat_pin)).unwrap());
+        info!("VB {}",
+            vbat_value);
+        Timer::after(Duration::from_millis(100)).await;
+    }
+}
 
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>, button: Input<'static>) {
