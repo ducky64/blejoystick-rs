@@ -3,8 +3,10 @@ use embassy_futures::join::join;
 use embassy_futures::select::select;
 use embassy_time::Timer;
 use embedded_storage_async::nor_flash::NorFlash;
+use rand_core::{CryptoRng, RngCore};
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{Key, SerializationError, Value};
+use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
 #[cfg(feature = "defmt")]
@@ -167,6 +169,26 @@ async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformati
         });
     }
     None
+}
+
+static RESOURCES: StaticCell<HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>> = StaticCell::new();
+
+/// Build the BLE stack, temporarily acquiring resources needed for construction
+pub fn build_stack<'a, C, TRNG>(controller: C, trng: &mut TRNG) -> Stack<'a, C, DefaultPacketPool> 
+where 
+    C: Controller + 'a,
+    TRNG: RngCore + CryptoRng
+{
+    // Using a fixed "random" address can be useful for testing. In real scenarios, one would
+    // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
+    let address: Address = Address::random([0xff, 0x8f, 0x08, 0x05, 0xe4, 0xff]);
+    info!("Our address = {}", address);
+
+    let resources = RESOURCES.init(HostResources::new());
+ 
+    return trouble_host::new(controller, resources)
+        .set_random_address(address)
+        .set_random_generator_seed(trng)
 }
 
 /// Run the BLE stack.

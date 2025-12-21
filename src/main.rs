@@ -80,28 +80,10 @@ async fn main(spawner: Spawner) {
     // Initialize the flash
     let mut flash = embassy_embedded_hal::adapter::BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
 
-    // ==== BLE INIT CODE BELOW TODO REFACTOR OUt ====
-
-    /// Max number of connections
-    const CONNECTIONS_MAX: usize = 1;
-
-    /// Max number of L2CAP channels.
-    const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
-
-    // Using a fixed "random" address can be useful for testing. In real scenarios, one would
-    // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
-    let address: Address = Address::random([0xff, 0x8f, 0x08, 0x05, 0xe4, 0xff]);
-    info!("Our address = {}", address);
-
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> = HostResources::new();
- 
     let stack = {
         let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
         let mut trng = Trng::try_new().unwrap();
-        
-        trouble_host::new(controller, &mut resources)
-            .set_random_address(address)
-            .set_random_generator_seed(&mut trng)
+        ble_peripheral::build_stack(controller, &mut trng)
     };
 
     let led = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
