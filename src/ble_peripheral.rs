@@ -88,45 +88,54 @@ impl Key for StoredAddr {
 
 struct StoredBondInformation {
     ltk: LongTermKey,
+    irk: Option<IdentityResolvingKey>,
     security_level: SecurityLevel,
 }
 
 impl<'a> Value<'a> for StoredBondInformation {
     fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        if buffer.len() < 17 {
+        if buffer.len() < 33 {
             return Err(SerializationError::BufferTooSmall);
         }
         buffer[0..16].copy_from_slice(self.ltk.to_le_bytes().as_slice());
-        buffer[16] = match self.security_level {
+        if let Some(irk) = self.irk {
+            buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
+        }
+        buffer[32] = match self.security_level {
             SecurityLevel::NoEncryption => 0,
             SecurityLevel::Encrypted => 1,
             SecurityLevel::EncryptedAuthenticated => 2,
         };
-        Ok(17)
+        Ok(33)
     }
 
     fn deserialize_from(buffer: &'a [u8]) -> Result<Self, SerializationError>
     where
         Self: Sized,
     {
-        if buffer.len() < 17 {
+        if buffer.len() < 33 {
             Err(SerializationError::BufferTooSmall)
         } else {
             let ltk = LongTermKey::from_le_bytes(buffer[0..16].try_into().unwrap());
-            let security_level = match buffer[16] {
+            let irk = if buffer[16..32] == [0; 16] {
+                None
+            } else {
+                Some(IdentityResolvingKey::from_le_bytes(buffer[16..32].try_into().unwrap()))
+            };
+            let security_level = match buffer[32] {
                 0 => SecurityLevel::NoEncryption,
                 1 => SecurityLevel::Encrypted,
                 2 => SecurityLevel::EncryptedAuthenticated,
                 _ => return Err(SerializationError::InvalidData),
             };
-            Ok(StoredBondInformation { ltk, security_level })
+            Ok(StoredBondInformation { ltk, irk, security_level })
         }
     }
 }
 
 fn flash_range<S: NorFlash>() -> Range<u32> {
     let start_addr = 0x10_0000;
-    start_addr..(start_addr + 8 * S::ERASE_SIZE as u32)
+    start_addr..(start_addr + 16 * S::ERASE_SIZE as u32)
 }
 
 async fn store_bonding_info<S: NorFlash>(
@@ -134,10 +143,11 @@ async fn store_bonding_info<S: NorFlash>(
     info: &BondInformation,
 ) -> Result<(), sequential_storage::Error<S::Error>> {
     sequential_storage::erase_all(storage, flash_range::<S>()).await?;
-    let mut buffer = [0; 32];
+    let mut buffer = [0; 64];
     let key = StoredAddr(info.identity.bd_addr);
     let value = StoredBondInformation {
         ltk: info.ltk,
+        irk: info.identity.irk,
         security_level: info.security_level,
     };
     sequential_storage::map::store_item(storage, flash_range::<S>(), &mut NoCache::new(), &mut buffer, &key, &value).await?;
@@ -145,7 +155,7 @@ async fn store_bonding_info<S: NorFlash>(
 }
 
 async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
-    let mut buffer = [0; 32];
+    let mut buffer = [0; 64];
     let mut cache = NoCache::new();
     let mut iter = sequential_storage::map::fetch_all_items::<StoredAddr, _, _>(
         storage,
@@ -159,7 +169,7 @@ async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformati
         return Some(BondInformation {
             identity: Identity {
                 bd_addr: key.0,
-                irk: None,
+                irk: value.irk,
             },
             security_level: value.security_level,
             is_bonded: true,
@@ -197,13 +207,11 @@ where
     C: Controller + 'a,
     S: NorFlash,
 {
-    let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
+    if let Some(bond_info) = load_bonding_info(storage).await {
         info!("Loaded bond information: {}", bond_info);
         stack.add_bond_information(bond_info).unwrap();
-        true
     } else {
         info!("No bond information found");
-        false
     };
 
     let Host {
@@ -213,7 +221,7 @@ where
     info!("Starting advertising and GATT service");
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: "TrouBLE",
-        appearance: &appearance::human_interface_device::GENERIC_HUMAN_INTERFACE_DEVICE,
+        appearance: &appearance::human_interface_device::GAMEPAD,
     }))
     .unwrap();
 
@@ -222,9 +230,9 @@ where
             match advertise("Trouble Example", &mut peripheral, &server).await {
                 Ok(conn) => {
                     // Allow bondable if no bond is stored.
-                    conn.raw().set_bondable(!bond_stored).unwrap();
+                    conn.raw().set_bondable(true).unwrap();
                     // set up tasks when the connection is established to a central, so they don't run when no one is connected.
-                    let a = gatt_events_task(storage, &server, &conn, &mut bond_stored);
+                    let a = gatt_events_task(storage, &server, &conn);
                     let b = custom_task(&server, &conn, &stack);
                     // run until any task ends (usually because the connection has been closed),
                     // then return to advertising state.
@@ -275,7 +283,6 @@ async fn gatt_events_task<S: NorFlash>(
     storage: &mut S,
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
-    bond_stored: &mut bool,
 ) -> Result<(), Error> {
     let level = server.battery_service.level;
     let reason = loop {
@@ -286,7 +293,6 @@ async fn gatt_events_task<S: NorFlash>(
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
                     store_bonding_info(storage, &bond).await.unwrap();
-                    *bond_stored = true;
                     info!("Bond information stored: {}", bond);
                 }
             }
