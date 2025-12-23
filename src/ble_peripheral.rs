@@ -98,9 +98,14 @@ impl<'a> Value<'a> for StoredBondInformation {
             return Err(SerializationError::BufferTooSmall);
         }
         buffer[0..16].copy_from_slice(self.ltk.to_le_bytes().as_slice());
-        if let Some(irk) = self.irk {
-            buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
-        }
+        match self.irk {
+            Some(irk) => {
+                buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
+            }
+            None => {
+                buffer[16..32].fill(0);
+            }
+        };
         buffer[32] = match self.security_level {
             SecurityLevel::NoEncryption => 0,
             SecurityLevel::Encrypted => 1,
