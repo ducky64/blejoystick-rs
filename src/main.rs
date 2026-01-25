@@ -10,7 +10,7 @@ use core::cell::RefCell;
 
 #[cfg(feature = "defmt")]
 use defmt::{debug, info, warn, error};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 #[cfg(feature = "log")]
 use log::{debug, info, warn, error};
@@ -20,7 +20,8 @@ use {esp_backtrace as _, esp_println as _};
 
 
 mod ble_peripheral;
-
+mod bus;
+use crate::bus::{GlobalBus, JoystickState};
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
@@ -49,7 +50,7 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 
-static ADC_MUTEX: StaticCell<Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>> = StaticCell::new();
+static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>> = StaticCell::new();
 
 
 #[esp_rtos::main]
@@ -69,6 +70,10 @@ async fn main(spawner: Spawner) {
         #[cfg(target_arch = "riscv32")]
         software_interrupt.software_interrupt0,
     );
+
+    // initialize global state
+    let bus = bus::init();
+
 
     // initialize BLE
     let radio = esp_radio::init().unwrap();
@@ -96,11 +101,11 @@ async fn main(spawner: Spawner) {
     let adc_mutex = ADC_MUTEX.init(Mutex::new(adc.into()));
 
     // build and run tasks
-    spawner.must_spawn(blinky(led, button));
-    spawner.must_spawn(read_ui(adc_mutex, x_pin, y_pin, trig_pin));
-    spawner.must_spawn(read_bat(adc_mutex, vbat_pin));
+    spawner.must_spawn(blinky(led));
+    spawner.must_spawn(read_ui(bus, adc_mutex, x_pin, y_pin, button, trig_pin));
+    spawner.must_spawn(read_bat(bus, adc_mutex, vbat_pin));
 
-    ble_peripheral::run(&stack, &mut flash).await;
+    ble_peripheral::run(bus, &stack, &mut flash).await;
 }
 
 
@@ -110,44 +115,54 @@ async fn main(spawner: Spawner) {
 // https://github.com/rust-embedded/embedded-hal/pull/376
 // so for now, the GPIO # is hardcoded instead of generic, yuck!
 #[embassy_executor::task]
-async fn read_ui(adc_mutex: &'static Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
+async fn read_ui(
+        bus: &'static GlobalBus,
+        adc_mutex: &'static Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
         mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
+        button: Input<'static>,
         mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
+    let josytick_state_sender = bus.joystick_state.sender();
     loop {
         let x_value = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut x_pin)).unwrap());
         let y_value = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut y_pin)).unwrap());
+        let btn_value = button.is_low();
         let trig_value = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut trig_pin)).unwrap());
-        debug!("JX {}    JY {}    Tr {}",
-            x_value,
-            y_value,
-            trig_value);
+        debug!("JX {}    JY {}    Btn{}    Tr {}",
+            x_value, y_value, btn_value, trig_value);
+        let joystick_state = JoystickState {
+            x: ((x_value as i32 - 2600) * (i16::MAX as i32) / 1100) as i16,
+            y: ((y_value as i32 - 2600) * (i16::MAX as i32) / 1100) as i16,
+            btn: btn_value,
+        };
+        josytick_state_sender.send(joystick_state);
         Timer::after(Duration::from_millis(250)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn read_bat(adc_mutex: &'static Mutex<NoopRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
+async fn read_bat(
+        bus: &'static GlobalBus,
+        adc_mutex: &'static Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
         mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
+    let vbus_sender = bus.vbat.sender();
     loop {
         let vbat_value = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut vbat_pin)).unwrap());
-        debug!("VBat {}",
-            vbat_value);
+        debug!("read vbat {}", vbat_value);
+        vbus_sender.send(vbat_value);  // TODO SCALING
         Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn blinky(mut led: Output<'static>, button: Input<'static>) {
+async fn blinky(mut led: Output<'static>) {
     loop {
-        if button.is_high() {  // button open
-            led.set_high();  // LED off
-        } else {
-            led.set_low();
-        }
-        Timer::after(Duration::from_millis(10)).await;
+        led.set_high();  // LED off
+        Timer::after(Duration::from_millis(50)).await;
+        led.set_low();
+        Timer::after(Duration::from_millis(50)).await;
     }
 }

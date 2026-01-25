@@ -9,6 +9,9 @@ use sequential_storage::map::{Key, SerializationError, Value};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
+use crate::bus::GlobalBus;
+
+
 #[cfg(feature = "defmt")]
 use defmt::{debug, info, warn, error};
 #[cfg(feature = "log")]
@@ -206,6 +209,7 @@ where
 
 /// Run the BLE stack.
 pub async fn run<'a, C, S>(
+    bus: &'static GlobalBus,
     stack: &'a Stack<'a, C, DefaultPacketPool>,
     storage: &mut S)
 where
