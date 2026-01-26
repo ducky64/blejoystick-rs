@@ -10,7 +10,7 @@ use ssmarshal::serialize;
 use trouble_host::prelude::*;
 
 use crate::bus::GlobalBus;
-use crate::ble_descriptors::{CompositeReport, Server};
+use crate::ble_descriptors::{DEVICE_NAME, MouseReport, Server};
 
 
 #[cfg(feature = "defmt")]
@@ -186,15 +186,15 @@ where
     } = stack.build();
 
     info!("Starting advertising and GATT service");
-    let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
-        name: "TrouBLE",
+    let server: Server<'_> = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
+        name: DEVICE_NAME,
         appearance: &appearance::human_interface_device::GAMEPAD,
     }))
     .unwrap();
 
     let _ = join(ble_task(runner), async {
         loop {
-            match advertise("Trouble Example", &mut peripheral, &server).await {
+            match advertise(DEVICE_NAME, &mut peripheral, &server).await {
                 Ok(conn) => {
                     // Allow bondable if no bond is stored.
                     conn.raw().set_bondable(true).unwrap();
@@ -362,33 +362,24 @@ async fn custom_task<C: Controller, P: PacketPool>(
     let mut joystick_reader = bus.joystick_state.receiver().unwrap();
     
     let level = server.battery_service.level;  // TODO move out
-    let hid_report = server.hid_service.report;
+    let hid_report = server.mouse_service.report;
 
     loop {
         let joystick = joystick_reader.changed().await;
 
-        let report = CompositeReport {
+        let report = MouseReport {
             buttons: if joystick.btn {1} else {0},
             x: (joystick.x / (i16::MAX/127)) as i8,
             y: 0,
-            wheel: (joystick.y / (i16::MAX/127)) as i8,
+            wheel: -(joystick.y / (i16::MAX/127)) as i8,
             pan: 0,
         };
 
         let mut buf = [0u8; 5];
-        serialize(&mut buf, &report);
-
-        info!("report {}", buf);
-
-        if hid_report.notify(conn, &buf).await.is_err() {
-            info!("[custom_task] error notifying connection");
-            break;
-        };
-
-        // if level.notify(conn, &((joystick.x / (i16::MAX/100) + 50) as u8)).await.is_err() {
-        //     info!("[custom_task] error notifying connection");
-        //     break;
-        // };
+        let _ = serialize(&mut buf, &report)
+            .inspect_err(|_| error!("failed to serialize"));
+        let _ = hid_report.notify(conn, &buf).await
+            .inspect_err(|e| error!("failed to notify: {}", e));
 
         // read RSSI (Received Signal Strength Indicator) of the connection.
         if let Ok(rssi) = conn.raw().rssi(stack).await {
@@ -397,6 +388,5 @@ async fn custom_task<C: Controller, P: PacketPool>(
             info!("[custom_task] error getting RSSI");
             break;
         };
-        // Timer::after_millis(250).await;
     }
 }

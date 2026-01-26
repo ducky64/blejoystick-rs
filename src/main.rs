@@ -138,7 +138,7 @@ async fn read_ui(
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
-        Timer::after(Duration::from_millis(100)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
