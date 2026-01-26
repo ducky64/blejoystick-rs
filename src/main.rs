@@ -20,6 +20,7 @@ use {esp_backtrace as _, esp_println as _};
 
 
 mod ble_peripheral;
+mod ble_descriptors;
 mod bus;
 use crate::bus::{GlobalBus, JoystickState};
 
