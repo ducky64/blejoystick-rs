@@ -242,7 +242,7 @@ where
                     conn.raw().set_bondable(true).unwrap();
                     // set up tasks when the connection is established to a central, so they don't run when no one is connected.
                     let a = gatt_events_task(storage, &server, &conn);
-                    let b = custom_task(&server, &conn, &stack);
+                    let b = custom_task(bus, &server, &conn, &stack);
                     // run until any task ends (usually because the connection has been closed),
                     // then return to advertising state.
                     select(a, b).await;
@@ -396,28 +396,29 @@ async fn advertise<'values, 'server, C: Controller>(
 /// It will also read the RSSI value every 2 seconds.
 /// and will stop when the connection is closed by the central or an error occurs.
 async fn custom_task<C: Controller, P: PacketPool>(
+    bus: &'static GlobalBus,
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
     stack: &Stack<'_, C, P>,
 ) {
-    let mut tick: u8 = 0;
+    let mut joystick_reader = bus.joystick_state.receiver().unwrap();
     
     let level = server.battery_service.level;
     loop {
-        // tick = tick.wrapping_add(1);
-        debug!("[custom_task] notifying connection of tick {}", tick);
-        if level.notify(conn, &tick).await.is_err() {
+        let joystick = joystick_reader.changed().await;
+        
+        if level.notify(conn, &((joystick.x / (i16::MAX/100) + 50) as u8)).await.is_err() {
             info!("[custom_task] error notifying connection");
             break;
         };
+
         // read RSSI (Received Signal Strength Indicator) of the connection.
         if let Ok(rssi) = conn.raw().rssi(stack).await {
             debug!("[custom_task] RSSI: {:?}", rssi);
-            tick = rssi.abs() as u8;
         } else {
             info!("[custom_task] error getting RSSI");
             break;
         };
-        Timer::after_secs(2).await;
+        // Timer::after_millis(250).await;
     }
 }
