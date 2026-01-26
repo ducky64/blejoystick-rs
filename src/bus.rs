@@ -3,7 +3,7 @@ use static_cell::StaticCell;
 
 #[derive(Clone, Copy, Default)]
 pub struct JoystickState {
-    pub x: i16,  // up-scaled to i16
+    pub x: i16,  // up-scaled to i16, deadzone pre-applied
     pub y: i16,
     pub btn: bool,
 }

@@ -115,6 +115,7 @@ dependencies = [
  "esp-rtos",
  "esp-storage",
  "log",
+ "num-traits",
  "rand_core 0.6.4",
  "sequential-storage",
  "serde",

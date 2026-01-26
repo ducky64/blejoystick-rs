@@ -14,6 +14,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 #[cfg(feature = "log")]
 use log::{debug, info, warn, error};
+use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
 use {esp_backtrace as _, esp_println as _};
@@ -109,6 +110,33 @@ async fn main(spawner: Spawner) {
 }
 
 
+fn scale_adc_bipolar<InType, ResultType, IntermediateType>(
+    adc_value: InType, center: InType, fullscale: InType, deadzone: InType
+) -> ResultType
+where
+    InType: PrimInt + AsPrimitive<IntermediateType>,
+    ResultType: PrimInt + Bounded + AsPrimitive<IntermediateType>,
+    IntermediateType: PrimInt + 'static,
+{
+    let adc_i: IntermediateType = adc_value.as_();
+    let center_i: IntermediateType = center.as_();
+    let deadzone_i: IntermediateType = deadzone.as_();
+    let scale_except_deadzone: IntermediateType = fullscale.as_() - deadzone_i;
+
+    let result = if adc_value > center + deadzone {
+        adc_i - center_i - deadzone_i
+    } else if adc_value < center - deadzone {
+        IntermediateType::zero() - (center_i - deadzone_i - adc_i)
+    } else {
+        IntermediateType::zero()
+    } * ResultType::max_value().as_() / scale_except_deadzone;
+
+    return ResultType::from(
+        result.clamp(ResultType::min_value().as_(), ResultType::max_value().as_())
+    ).unwrap_or(ResultType::zero());
+}
+
+
 // the ADC API seems to be a bit of a dumpster fire
 // https://github.com/esp-rs/esp-hal/issues/449
 // such that it was removed int he embedded hal 1.0 API
@@ -121,20 +149,26 @@ async fn read_ui(
         mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
         button: Input<'static>,
         mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
+    const CENTER_X: u16 = 2610;
+    const CENTER_Y: u16 = 2650;
+    const FULLSCALE_XY: u16 = 1000;  // adc counts for full scale, half-span
+    const DEADZONE_XY: u16 = 32;  // in ADC counts, half-span
+
     let josytick_state_sender = bus.joystick_state.sender();
     loop {
-        let x_value = adc_mutex.lock(|adc| 
+        let x_adc = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut x_pin)).unwrap());
-        let y_value = adc_mutex.lock(|adc| 
+        let y_adc = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut y_pin)).unwrap());
         let btn_value = button.is_low();
-        let trig_value = adc_mutex.lock(|adc| 
+        let trig_adc = adc_mutex.lock(|adc| 
             nb::block!(adc.borrow_mut().read_oneshot(&mut trig_pin)).unwrap());
-        debug!("JX {}    JY {}    Btn{}    Tr {}",
-            x_value, y_value, btn_value, trig_value);
+        debug!("JX {}    JY {}    Btn {}    Tr {}",
+            x_adc, y_adc, btn_value, trig_adc);
+
         let joystick_state = JoystickState {
-            x: ((x_value as i32 - 2600) * (i16::MAX as i32) / 1100) as i16,
-            y: ((y_value as i32 - 2600) * (i16::MAX as i32) / 1100) as i16,
+            x: scale_adc_bipolar::<u16, i16, i32>(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY),
+            y: scale_adc_bipolar::<u16, i16, i32>(y_adc, CENTER_Y, FULLSCALE_XY, DEADZONE_XY),
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
@@ -156,6 +190,7 @@ async fn read_bat(
         Timer::after(Duration::from_millis(1000)).await;
     }
 }
+
 
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>) {

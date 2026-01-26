@@ -18,6 +18,8 @@ esp-backtrace = { version = "0.18.0", features = [ "panic-handler" ] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 ssmarshal = { version = "1.0", default-features = false }
 
+num-traits = { version = "0.2.19", default-features = false }
+
 embassy-executor = "0.9.1"
 esp-bootloader-esp-idf = "0.4.0"
 esp-hal = { version = "1.0.0", features = [ "unstable" ] }
