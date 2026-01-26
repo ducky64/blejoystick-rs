@@ -75,7 +75,6 @@ async fn main(spawner: Spawner) {
     // initialize global state
     let bus = bus::init();
 
-
     // initialize BLE
     let radio = esp_radio::init().unwrap();
     let bluetooth = peripherals.BT;
@@ -162,8 +161,8 @@ async fn read_bat(
 async fn blinky(mut led: Output<'static>) {
     loop {
         led.set_high();  // LED off
-        Timer::after(Duration::from_millis(50)).await;
+        Timer::after(Duration::from_millis(250)).await;
         led.set_low();
-        Timer::after(Duration::from_millis(50)).await;
+        Timer::after(Duration::from_millis(250)).await;
     }
 }
