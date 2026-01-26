@@ -118,6 +118,7 @@ dependencies = [
  "rand_core 0.6.4",
  "sequential-storage",
  "serde",
+ "ssmarshal",
  "static_cell",
  "trouble-host",
  "usbd-hid",

@@ -17,8 +17,6 @@ use serde::Serialize;
 // - paste the result into the characteristic buffer length
 
 
-/// A composite hid report which contains mouse, consumer, system reports.
-/// Report id is used to distinguish from them.
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = MOUSE) = {
         (collection = PHYSICAL, usage = POINTER) = {
@@ -55,9 +53,6 @@ pub struct CompositeReport {
     pub(crate) pan: i8,   // Scroll left (negative) or right (positive) this many units
 }
 
-fn _check_len() {
-    let _: [u8; 1] = *CompositeReport::desc(); 
-}
 
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct CompositeService {
@@ -69,7 +64,7 @@ pub(crate) struct CompositeService {
     pub(crate) hid_control_point: u8,
     #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
     pub(crate) protocol_mode: u8,
-    #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
+    #[descriptor(uuid = "2908", read, value = [0x01, 1u8])]
     #[characteristic(uuid = "2a4d", read, notify)]
     pub(crate) report: [u8; 5],
 }

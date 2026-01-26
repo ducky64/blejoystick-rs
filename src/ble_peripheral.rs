@@ -1,16 +1,16 @@
 use core::ops::Range;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
-use embassy_time::Timer;
 use embedded_storage_async::nor_flash::NorFlash;
 use rand_core::{CryptoRng, RngCore};
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{Key, SerializationError, Value};
 use static_cell::StaticCell;
+use ssmarshal::serialize;
 use trouble_host::prelude::*;
 
 use crate::bus::GlobalBus;
-use crate::ble_descriptors::Server;
+use crate::ble_descriptors::{CompositeReport, Server};
 
 
 #[cfg(feature = "defmt")]
@@ -361,14 +361,34 @@ async fn custom_task<C: Controller, P: PacketPool>(
 ) {
     let mut joystick_reader = bus.joystick_state.receiver().unwrap();
     
-    let level = server.battery_service.level;
+    let level = server.battery_service.level;  // TODO move out
+    let hid_report = server.hid_service.report;
+
     loop {
         let joystick = joystick_reader.changed().await;
 
-        if level.notify(conn, &((joystick.x / (i16::MAX/100) + 50) as u8)).await.is_err() {
+        let report = CompositeReport {
+            buttons: if joystick.btn {1} else {0},
+            x: (joystick.x / (i16::MAX/127)) as i8,
+            y: 0,
+            wheel: (joystick.y / (i16::MAX/127)) as i8,
+            pan: 0,
+        };
+
+        let mut buf = [0u8; 5];
+        serialize(&mut buf, &report);
+
+        info!("report {}", buf);
+
+        if hid_report.notify(conn, &buf).await.is_err() {
             info!("[custom_task] error notifying connection");
             break;
         };
+
+        // if level.notify(conn, &((joystick.x / (i16::MAX/100) + 50) as u8)).await.is_err() {
+        //     info!("[custom_task] error notifying connection");
+        //     break;
+        // };
 
         // read RSSI (Received Signal Strength Indicator) of the connection.
         if let Ok(rssi) = conn.raw().rssi(stack).await {
