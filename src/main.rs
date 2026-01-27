@@ -73,6 +73,9 @@ async fn main(spawner: Spawner) {
         software_interrupt.software_interrupt0,
     );
 
+    info!("report length = {}", 
+        <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
+
     // initialize global state
     let bus = bus::init();
 

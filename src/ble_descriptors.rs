@@ -4,6 +4,12 @@ use usbd_hid::descriptor::SerializedDescriptor;
 use serde::Serialize;
 
 
+#[cfg(feature = "defmt")]
+use defmt::{debug, info, warn, error};
+#[cfg(feature = "log")]
+use log::{debug, info, warn, error};
+
+
 pub const DEVICE_NAME: &str = "Ducky RingJoystick";
 
 
@@ -32,8 +38,7 @@ pub(crate) struct BatteryService {
 // or it will crash before main starts.
 // As of usbd-hid 0.9.0, the descriptor is not available at compiler time.
 // Workaround: get the length at runtime, then update the code
-// - comment out references to the server
-// - in main, print the length, for example
+// - in main, before the BLE stack starts (and crashes), print the length, for example
 //     info!("report length = {}", 
 //         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
 // - paste the result into the characteristic buffer length
@@ -73,6 +78,17 @@ pub struct MouseReport {
     pub pan: i8,   // Scroll left (negative) or right (positive) this many units
 }
 
+impl MouseReport {
+    pub const SIZE: usize = core::mem::size_of::<MouseReport>();
+
+    pub fn serialize(&self) -> [u8; Self::SIZE] {
+        let mut buf = [0u8; Self::SIZE];
+        let _ = ssmarshal::serialize(&mut buf, self)
+            .inspect_err(|_| error!("failed to serialize"));
+        buf
+    }
+}
+
 
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct MouseService {
@@ -86,7 +102,7 @@ pub(crate) struct MouseService {
     pub(crate) protocol_mode: u8,
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) report: [u8; 5],
+    pub(crate) report: [u8; MouseReport::SIZE],
 }
 
 

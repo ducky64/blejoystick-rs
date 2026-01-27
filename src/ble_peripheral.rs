@@ -375,10 +375,7 @@ async fn custom_task<C: Controller, P: PacketPool>(
             pan: 0,
         };
 
-        let mut buf = [0u8; 5];
-        let _ = serialize(&mut buf, &report)
-            .inspect_err(|_| error!("failed to serialize"));
-        let _ = hid_report.notify(conn, &buf).await
+        let _ = hid_report.notify(conn, &report.serialize()).await
             .inspect_err(|e| error!("failed to notify: {}", e));
 
         // read RSSI (Received Signal Strength Indicator) of the connection.
