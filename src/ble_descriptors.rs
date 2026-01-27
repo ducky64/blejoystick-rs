@@ -70,6 +70,7 @@ pub(crate) struct BatteryService {
     }
 )]
 #[allow(dead_code)]
+#[derive(defmt::Format)]
 pub struct MouseReport {
     pub buttons: u8,
     pub x: i8,
@@ -108,6 +109,7 @@ pub(crate) struct MouseService {
 
 // GATT Server definition
 #[gatt_server]
+#[allow(dead_code)]
 pub(crate) struct Server {
     pub(crate) device_information: DeviceInformationService,
     pub(crate) battery_service: BatteryService,
