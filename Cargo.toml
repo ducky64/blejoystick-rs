@@ -31,7 +31,7 @@ trouble-host = { version = "0.5.1", features = ["default-packet-pool-mtu-255"] }
 
 # for BLE 'security' feature
 embedded-storage-async = { version = "0.4.1", optional = true }
-sequential-storage = { version = "5.0.0", optional = true }
+sequential-storage = { version = "7.1.0", optional = true }
 embassy-futures = "0.1.1"
 rand_core = { version = "0.6", default-features = false }
 

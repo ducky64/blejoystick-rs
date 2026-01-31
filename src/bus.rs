@@ -1,5 +1,11 @@
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, watch::Watch};
+use core::cell::RefCell;
+
+use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_sync::{blocking_mutex::{Mutex, raw::CriticalSectionRawMutex}, watch::Watch};
+use esp_storage::FlashStorage;
+use sequential_storage::{cache::NoCache, map::MapStorage};
 use static_cell::StaticCell;
+
 
 #[derive(Clone, Copy, Default)]
 pub struct JoystickState {
@@ -10,6 +16,8 @@ pub struct JoystickState {
 
 
 pub struct GlobalBus {
+    pub storage: Mutex<CriticalSectionRawMutex, RefCell<MapStorage<u8, BlockingAsync<FlashStorage<'static>>, NoCache>>>,
+
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
     pub vbat: Watch<CriticalSectionRawMutex, u16, 2>,  // in mV
 }
@@ -17,8 +25,13 @@ pub struct GlobalBus {
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
 
-pub fn init() -> &'static GlobalBus {
+
+pub fn init(
+  storage: MapStorage<u8, BlockingAsync<FlashStorage<'static>>, NoCache>
+) -> &'static GlobalBus {
   BUS.init(GlobalBus {
+    storage: Mutex::new(storage.into()),
+
     joystick_state: Watch::new(),
     vbat: Watch::new(),
   })

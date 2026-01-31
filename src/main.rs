@@ -10,10 +10,13 @@ use core::cell::RefCell;
 
 #[cfg(feature = "defmt")]
 use defmt::{debug, info, warn, error};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
-use embassy_sync::blocking_mutex::Mutex;
 #[cfg(feature = "log")]
 use log::{debug, info, warn, error};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_embedded_hal::adapter::BlockingAsync;
+use sequential_storage::map::{MapStorage, MapConfig};
+use sequential_storage::cache::NoCache;
 use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
@@ -76,15 +79,19 @@ async fn main(spawner: Spawner) {
     info!("report length = {}", 
         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
 
-    // initialize global state
-    let bus = bus::init();
+    // initialize global state and shared peripherals
+    let mut flash = BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
+    let storage = MapStorage::<u8, BlockingAsync<FlashStorage<'static>>, NoCache>::new(
+        flash, 
+        const { MapConfig::new(0x10_0000..0x12_0000) }, 
+        NoCache::new());
+    let bus = bus::init(storage);
 
     // initialize BLE
     let radio = esp_radio::init().unwrap();
     let bluetooth = peripherals.BT;
     let connector = BleConnector::new(&radio, bluetooth, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
-    let mut flash = embassy_embedded_hal::adapter::BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
     let stack = {
         let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
         let mut trng = Trng::try_new().unwrap();
@@ -109,7 +116,7 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(read_ui(bus, adc_mutex, x_pin, y_pin, button, trig_pin));
     spawner.must_spawn(read_bat(bus, adc_mutex, vbat_pin));
 
-    ble_peripheral::run(bus, &stack, &mut flash).await;
+    ble_peripheral::run(bus, &stack).await;
 }
 
 

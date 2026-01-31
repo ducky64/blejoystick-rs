@@ -6,7 +6,6 @@ use rand_core::{CryptoRng, RngCore};
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{Key, SerializationError, Value};
 use static_cell::StaticCell;
-use ssmarshal::serialize;
 use trouble_host::prelude::*;
 
 use crate::bus::GlobalBus;
@@ -53,97 +52,97 @@ struct StoredBondInformation {
     security_level: SecurityLevel,
 }
 
-impl<'a> Value<'a> for StoredBondInformation {
-    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        if buffer.len() < 33 {
-            return Err(SerializationError::BufferTooSmall);
-        }
-        buffer[0..16].copy_from_slice(self.ltk.to_le_bytes().as_slice());
-        match self.irk {
-            Some(irk) => {
-                buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
-            }
-            None => {
-                buffer[16..32].fill(0);
-            }
-        };
-        buffer[32] = match self.security_level {
-            SecurityLevel::NoEncryption => 0,
-            SecurityLevel::Encrypted => 1,
-            SecurityLevel::EncryptedAuthenticated => 2,
-        };
-        Ok(33)
-    }
+// impl<'a> Value<'a> for StoredBondInformation {
+//     fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
+//         if buffer.len() < 33 {
+//             return Err(SerializationError::BufferTooSmall);
+//         }
+//         buffer[0..16].copy_from_slice(self.ltk.to_le_bytes().as_slice());
+//         match self.irk {
+//             Some(irk) => {
+//                 buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
+//             }
+//             None => {
+//                 buffer[16..32].fill(0);
+//             }
+//         };
+//         buffer[32] = match self.security_level {
+//             SecurityLevel::NoEncryption => 0,
+//             SecurityLevel::Encrypted => 1,
+//             SecurityLevel::EncryptedAuthenticated => 2,
+//         };
+//         Ok(33)
+//     }
 
-    fn deserialize_from(buffer: &'a [u8]) -> Result<Self, SerializationError>
-    where
-        Self: Sized,
-    {
-        if buffer.len() < 33 {
-            Err(SerializationError::BufferTooSmall)
-        } else {
-            let ltk = LongTermKey::from_le_bytes(buffer[0..16].try_into().unwrap());
-            let irk = if buffer[16..32] == [0; 16] {
-                None
-            } else {
-                Some(IdentityResolvingKey::from_le_bytes(buffer[16..32].try_into().unwrap()))
-            };
-            let security_level = match buffer[32] {
-                0 => SecurityLevel::NoEncryption,
-                1 => SecurityLevel::Encrypted,
-                2 => SecurityLevel::EncryptedAuthenticated,
-                _ => return Err(SerializationError::InvalidData),
-            };
-            Ok(StoredBondInformation { ltk, irk, security_level })
-        }
-    }
-}
+//     fn deserialize_from(buffer: &'a [u8]) -> Result<Self, SerializationError>
+//     where
+//         Self: Sized,
+//     {
+//         if buffer.len() < 33 {
+//             Err(SerializationError::BufferTooSmall)
+//         } else {
+//             let ltk = LongTermKey::from_le_bytes(buffer[0..16].try_into().unwrap());
+//             let irk = if buffer[16..32] == [0; 16] {
+//                 None
+//             } else {
+//                 Some(IdentityResolvingKey::from_le_bytes(buffer[16..32].try_into().unwrap()))
+//             };
+//             let security_level = match buffer[32] {
+//                 0 => SecurityLevel::NoEncryption,
+//                 1 => SecurityLevel::Encrypted,
+//                 2 => SecurityLevel::EncryptedAuthenticated,
+//                 _ => return Err(SerializationError::InvalidData),
+//             };
+//             Ok(StoredBondInformation { ltk, irk, security_level })
+//         }
+//     }
+// }
 
-fn flash_range<S: NorFlash>() -> Range<u32> {
-    let start_addr = 0x10_0000;
-    start_addr..(start_addr + 16 * S::ERASE_SIZE as u32)
-}
+// fn flash_range<S: NorFlash>() -> Range<u32> {
+//     let start_addr = 0x10_0000;
+//     start_addr..(start_addr + 16 * S::ERASE_SIZE as u32)
+// }
 
-async fn store_bonding_info<S: NorFlash>(
-    storage: &mut S,
-    info: &BondInformation,
-) -> Result<(), sequential_storage::Error<S::Error>> {
-    sequential_storage::erase_all(storage, flash_range::<S>()).await?;
-    let mut buffer = [0; 64];
-    let key = StoredAddr(info.identity.bd_addr);
-    let value = StoredBondInformation {
-        ltk: info.ltk,
-        irk: info.identity.irk,
-        security_level: info.security_level,
-    };
-    sequential_storage::map::store_item(storage, flash_range::<S>(), &mut NoCache::new(), &mut buffer, &key, &value).await?;
-    Ok(())
-}
+// async fn store_bonding_info<S: NorFlash>(
+//     storage: &mut S,
+//     info: &BondInformation,
+// ) -> Result<(), sequential_storage::Error<S::Error>> {
+//     sequential_storage::erase_all(storage, flash_range::<S>()).await?;
+//     let mut buffer = [0; 64];
+//     let key = StoredAddr(info.identity.bd_addr);
+//     let value = StoredBondInformation {
+//         ltk: info.ltk,
+//         irk: info.identity.irk,
+//         security_level: info.security_level,
+//     };
+//     sequential_storage::map::store_item(storage, flash_range::<S>(), &mut NoCache::new(), &mut buffer, &key, &value).await?;
+//     Ok(())
+// }
 
-async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
-    let mut buffer = [0; 64];
-    let mut cache = NoCache::new();
-    let mut iter = sequential_storage::map::fetch_all_items::<StoredAddr, _, _>(
-        storage,
-        flash_range::<S>(),
-        &mut cache,
-        &mut buffer,
-    )
-    .await
-    .ok()?;
-    while let Some((key, value)) = iter.next::<StoredBondInformation>(&mut buffer).await.ok()? {
-        return Some(BondInformation {
-            identity: Identity {
-                bd_addr: key.0,
-                irk: value.irk,
-            },
-            security_level: value.security_level,
-            is_bonded: true,
-            ltk: value.ltk,
-        });
-    }
-    None
-}
+// async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
+//     let mut buffer = [0; 64];
+//     let mut cache = NoCache::new();
+//     let mut iter = sequential_storage::map::fetch_all_items::<StoredAddr, _, _>(
+//         storage,
+//         flash_range::<S>(),
+//         &mut cache,
+//         &mut buffer,
+//     )
+//     .await
+//     .ok()?;
+//     while let Some((key, value)) = iter.next::<StoredBondInformation>(&mut buffer).await.ok()? {
+//         return Some(BondInformation {
+//             identity: Identity {
+//                 bd_addr: key.0,
+//                 irk: value.irk,
+//             },
+//             security_level: value.security_level,
+//             is_bonded: true,
+//             ltk: value.ltk,
+//         });
+//     }
+//     None
+// }
 
 static RESOURCES: StaticCell<HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>> = StaticCell::new();
 
@@ -166,20 +165,18 @@ where
 }
 
 /// Run the BLE stack.
-pub async fn run<'a, C, S>(
+pub async fn run<'a, C>(
     bus: &'static GlobalBus,
-    stack: &'a Stack<'a, C, DefaultPacketPool>,
-    storage: &mut S)
+    stack: &'a Stack<'a, C, DefaultPacketPool>)
 where
     C: Controller + 'a,
-    S: NorFlash,
 {
-    if let Some(bond_info) = load_bonding_info(storage).await {
-        info!("Loaded bond information: {}", bond_info);
-        stack.add_bond_information(bond_info).unwrap();
-    } else {
-        info!("No bond information found");
-    };
+    // if let Some(bond_info) = load_bonding_info(storage).await {
+    //     info!("Loaded bond information: {}", bond_info);
+    //     stack.add_bond_information(bond_info).unwrap();
+    // } else {
+    //     info!("No bond information found");
+    // };
 
     let Host {
         mut peripheral, runner, ..
@@ -199,7 +196,7 @@ where
                     // Allow bondable if no bond is stored.
                     conn.raw().set_bondable(true).unwrap();
                     // set up tasks when the connection is established to a central, so they don't run when no one is connected.
-                    let a = gatt_events_task(storage, &server, &conn);
+                    let a = gatt_events_task(bus, &server, &conn);
                     let b = custom_task(bus, &server, &conn, &stack);
                     // run until any task ends (usually because the connection has been closed),
                     // then return to advertising state.
@@ -246,8 +243,8 @@ async fn ble_task<C: Controller, P: PacketPool>(mut runner: Runner<'_, C, P>) {
 ///
 /// This function will handle the GATT events and process them.
 /// This is how we interact with read and write requests.
-async fn gatt_events_task<S: NorFlash>(
-    storage: &mut S,
+async fn gatt_events_task(
+    bus: &'static GlobalBus,
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
 ) -> Result<(), Error> {
@@ -257,9 +254,12 @@ async fn gatt_events_task<S: NorFlash>(
             GattConnectionEvent::Disconnected { reason } => break reason,
             #[cfg(feature = "security")]
             GattConnectionEvent::PairingComplete { security_level, bond } => {
+                let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
+                info!("cccd {}", cccd_table);
+
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    store_bonding_info(storage, &bond).await.unwrap();
+                    // store_bonding_info(storage, &bond).await.unwrap();
                     info!("Bond information stored: {}", bond);
                 }
             }
@@ -270,10 +270,8 @@ async fn gatt_events_task<S: NorFlash>(
             GattConnectionEvent::Gatt { event } => {
                 let result = match &event {
                     GattEvent::Read(event) => {
-                        if event.handle() == level.handle {
-                            let value = server.get(&level);
-                            info!("[gatt] Read Event to Level Characteristic: {:?}", value);
-                        }
+                        info!("[gatt] Read Event to Characteristic {}", event.handle());
+
                         #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
                             None
@@ -284,9 +282,8 @@ async fn gatt_events_task<S: NorFlash>(
                         None
                     }
                     GattEvent::Write(event) => {
-                        if event.handle() == level.handle {
-                            info!("[gatt] Write Event to Level Characteristic: {:?}", event.data());
-                        }
+                        info!("[gatt] Write Event to Characteristic {}: {:?}", event.handle(), event.data());
+
                         #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
                             None
