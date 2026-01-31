@@ -1,10 +1,8 @@
-use core::ops::Range;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
-use embedded_storage_async::nor_flash::NorFlash;
 use rand_core::{CryptoRng, RngCore};
-use sequential_storage::cache::NoCache;
 use sequential_storage::map::{Key, SerializationError, Value};
+use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
@@ -25,78 +23,46 @@ const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StoredAddr(BdAddr);
-
-impl Key for StoredAddr {
-    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        if buffer.len() < 6 {
-            return Err(SerializationError::BufferTooSmall);
-        }
-        buffer[0..6].copy_from_slice(self.0.raw());
-        Ok(6)
-    }
-
-    fn deserialize_from(buffer: &[u8]) -> Result<(Self, usize), SerializationError> {
-        if buffer.len() < 6 {
-            Err(SerializationError::BufferTooSmall)
-        } else {
-            Ok((StoredAddr(BdAddr::new(buffer[0..6].try_into().unwrap())), 6))
-        }
-    }
-}
-
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredBondInformation {
-    ltk: LongTermKey,
-    irk: Option<IdentityResolvingKey>,
-    security_level: SecurityLevel,
+    addr: [u8; 6],
+    ltk: u128,
+    irk: Option<u128>,
+    security_level: u8,
 }
 
-// impl<'a> Value<'a> for StoredBondInformation {
-//     fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-//         if buffer.len() < 33 {
-//             return Err(SerializationError::BufferTooSmall);
-//         }
-//         buffer[0..16].copy_from_slice(self.ltk.to_le_bytes().as_slice());
-//         match self.irk {
-//             Some(irk) => {
-//                 buffer[16..32].copy_from_slice(irk.to_le_bytes().as_slice());
-//             }
-//             None => {
-//                 buffer[16..32].fill(0);
-//             }
-//         };
-//         buffer[32] = match self.security_level {
-//             SecurityLevel::NoEncryption => 0,
-//             SecurityLevel::Encrypted => 1,
-//             SecurityLevel::EncryptedAuthenticated => 2,
-//         };
-//         Ok(33)
-//     }
+impl StoredBondInformation {
+    pub fn new(addr: BdAddr, ltk: LongTermKey, irk: Option<IdentityResolvingKey>, security_level: SecurityLevel) -> Self {
+        Self {
+            addr: addr.raw().try_into().unwrap(),
+            ltk: ltk.0,
+            irk: irk.map(|i| i.0),
+            security_level: match security_level {
+                SecurityLevel::Encrypted => 1,
+                SecurityLevel::EncryptedAuthenticated => 2,
+                SecurityLevel::NoEncryption => 0,
+        }
+        }
+    }
 
-//     fn deserialize_from(buffer: &'a [u8]) -> Result<Self, SerializationError>
-//     where
-//         Self: Sized,
-//     {
-//         if buffer.len() < 33 {
-//             Err(SerializationError::BufferTooSmall)
-//         } else {
-//             let ltk = LongTermKey::from_le_bytes(buffer[0..16].try_into().unwrap());
-//             let irk = if buffer[16..32] == [0; 16] {
-//                 None
-//             } else {
-//                 Some(IdentityResolvingKey::from_le_bytes(buffer[16..32].try_into().unwrap()))
-//             };
-//             let security_level = match buffer[32] {
-//                 0 => SecurityLevel::NoEncryption,
-//                 1 => SecurityLevel::Encrypted,
-//                 2 => SecurityLevel::EncryptedAuthenticated,
-//                 _ => return Err(SerializationError::InvalidData),
-//             };
-//             Ok(StoredBondInformation { ltk, irk, security_level })
-//         }
-//     }
-// }
+    pub fn addr(self) -> BdAddr {
+        BdAddr::new(self.addr)
+    }
+    pub fn ltk(self) -> LongTermKey {
+        LongTermKey(self.ltk)
+    }
+    pub fn irk(self) -> Option<IdentityResolvingKey> {
+        self.irk.map(|i| IdentityResolvingKey(i))
+    }
+    pub fn security_level(self) -> SecurityLevel {
+        match self.security_level {
+            1 => SecurityLevel::Encrypted,
+            2 => SecurityLevel::EncryptedAuthenticated,
+            _ => SecurityLevel::NoEncryption,
+        }
+    }
+}
+
 
 // fn flash_range<S: NorFlash>() -> Range<u32> {
 //     let start_addr = 0x10_0000;
