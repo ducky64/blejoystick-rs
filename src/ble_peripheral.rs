@@ -1,6 +1,7 @@
 use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
+use heapless::LinearMap;
 use rand_core::{CryptoRng, RngCore};
 
 use sequential_storage::map::PostcardValue;
@@ -10,6 +11,7 @@ use trouble_host::prelude::*;
 
 use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
 use crate::bus::{GlobalBus, StorageKey};
+use crate::util::FormatLinearMap;
 
 #[cfg(feature = "defmt")]
 use defmt::{debug, error, info, warn};
@@ -22,12 +24,15 @@ const CONNECTIONS_MAX: usize = 1;
 /// Max number of L2CAP channels.
 const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
 
-#[derive(Debug, Format, Clone, Serialize, Deserialize, PartialEq)]
+const STORED_CCCD_MAX: usize = 8;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Format)]
 struct StoredBondInformation {
     addr: [u8; 6],
     ltk: u128,
     irk: Option<u128>,
     security_level: u8,
+    cccds: FormatLinearMap<u16, u16, STORED_CCCD_MAX>,
 }
 impl<'a> PostcardValue<'a> for StoredBondInformation {}
 
@@ -42,10 +47,11 @@ impl StoredBondInformation {
                 SecurityLevel::EncryptedAuthenticated => 2,
                 SecurityLevel::NoEncryption => 0,
             },
+            cccds: FormatLinearMap(LinearMap::new()),
         }
     }
 
-    pub fn security_level(self) -> SecurityLevel {
+    pub fn security_level(&self) -> SecurityLevel {
         match self.security_level {
             1 => SecurityLevel::Encrypted,
             2 => SecurityLevel::EncryptedAuthenticated,
@@ -53,7 +59,7 @@ impl StoredBondInformation {
         }
     }
 
-    pub fn bond_info(self) -> BondInformation {
+    pub fn bond_info(&self) -> BondInformation {
         BondInformation {
             ltk: LongTermKey(self.ltk),
             identity: Identity {
@@ -184,10 +190,31 @@ async fn gatt_events_task(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
 ) -> Result<(), Error> {
-    let level = server.battery_service.level;
+    let stored_bond_info = {
+        let mut storage = bus.storage.lock().await;
+        let mut buf = [0u8; 128];
+        storage
+            .fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo)
+            .await
+            .inspect_err(|e| error!("error reading bonding info {}", defmt::Debug2Format(e)))
+            .ok()
+            .flatten()
+            .filter(|value| {
+                value
+                    .bond_info()
+                    .identity
+                    .match_address(&conn.raw().peer_address())
+            })
+    };
+    info!("[gatt] loaded stored bond info: {:?}", stored_bond_info);
+
     let reason = loop {
-        match conn.next().await {
-            GattConnectionEvent::Disconnected { reason } => break reason,
+        let conn_event = conn.next().await;
+        match conn_event {
+            GattConnectionEvent::Disconnected { reason } => {
+                info!("[gatt] disconnected: {}", reason);
+                break reason;
+            }
             #[cfg(feature = "security")]
             GattConnectionEvent::PairingComplete {
                 security_level,

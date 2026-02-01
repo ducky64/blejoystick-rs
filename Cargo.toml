@@ -15,7 +15,7 @@ defmt = { version = "1.0.1", optional = true }
 log = { version = "0.4", optional = true }
 esp-backtrace = { version = "0.18.0", features = ["panic-handler"] }
 
-heapless = { version = "0.9" }
+heapless = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"], default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
 ssmarshal = { version = "1.0", default-features = false }                     # for packing BLE wire formats
