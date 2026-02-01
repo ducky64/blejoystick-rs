@@ -100,7 +100,9 @@ where
     let stored_bond_info = {
         let mut storage = bus.storage.lock().await;
         let mut buf = [0u8; 128];
-        storage.fetch_item::<StoredBondInformation>(&mut buf, &(StorageKey::BondingInfo as u8)).await.unwrap()
+        storage.fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo).await
+            .inspect_err(|e| error!("error reading bonding info {}", defmt::Debug2Format(e)))
+            .ok().flatten()
     };
     if let Some(stored_bond_info) = stored_bond_info {
         info!("Loaded bond information: {}", stored_bond_info);
@@ -195,7 +197,7 @@ async fn gatt_events_task(
                         let mut buf = [0u8; 128];
                         storage.store_item(
                             &mut buf, 
-                            &(StorageKey::BondingInfo as u8), 
+                            &StorageKey::BondingInfo, 
                             &StoredBondInformation::from_bond_info(&bond)).await
                     }.inspect_err(|_| error!("Failed to store bond info"));
                     info!("Bond information stored: {}", bond);

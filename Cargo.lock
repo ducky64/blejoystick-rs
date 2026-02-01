@@ -129,6 +129,7 @@ dependencies = [
  "serde",
  "ssmarshal",
  "static_cell",
+ "strum",
  "trouble-host",
  "usbd-hid",
 ]

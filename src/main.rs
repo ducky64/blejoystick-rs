@@ -13,9 +13,6 @@ use esp_hal::Async;
 use log::{debug, info, warn, error};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
 use embassy_sync::mutex::Mutex;
-use embassy_embedded_hal::adapter::BlockingAsync;
-use sequential_storage::map::{MapStorage, MapConfig};
-use sequential_storage::cache::NoCache;
 use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
@@ -29,7 +26,7 @@ use crate::bus::{GlobalBus, JoystickState};
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
-use esp_hal::{Blocking, analog::adc::{AdcPin}, clock::CpuClock, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
+use esp_hal::{analog::adc::{AdcPin}, clock::CpuClock, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::ble::controller::BleConnector;
 use trouble_host::prelude::ExternalController;
@@ -40,7 +37,6 @@ use esp_hal::rng::{Trng, TrngSource};
 use esp_storage::FlashStorage;
 
 // App-specific imports
-use embedded_hal_nb::nb;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
     gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig},
@@ -79,12 +75,8 @@ async fn main(spawner: Spawner) {
         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
 
     // initialize global state and shared peripherals
-    let flash = BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
-    let storage = MapStorage::<u8, BlockingAsync<FlashStorage<'static>>, NoCache>::new(
-        flash, 
-        const { MapConfig::new(0x10_0000..0x12_0000) }, 
-        NoCache::new());
-    let bus = bus::init(storage);
+    let flash = FlashStorage::new(peripherals.FLASH);
+    let bus = bus::init(flash);
 
     // initialize BLE
     let radio = esp_radio::init().unwrap();
