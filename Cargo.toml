@@ -1,8 +1,8 @@
 [package]
-edition      = "2021"
-name         = "blejoystick-rs"
+edition = "2021"
+name = "blejoystick-rs"
 rust-version = "1.86"
-version      = "0.1.0"
+version = "0.1.0"
 
 [[bin]]
 name = "blejoystick-rs"
@@ -13,30 +13,35 @@ path = "./src/main.rs"
 [dependencies]
 defmt = { version = "1.0.1", optional = true }
 log = { version = "0.4", optional = true }
-esp-backtrace = { version = "0.18.0", features = [ "panic-handler" ] }
+esp-backtrace = { version = "0.18.0", features = ["panic-handler"] }
 
+heapless = { version = "0.9" }
 strum = { version = "0.27", features = ["derive"], default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
-ssmarshal = { version = "1.0", default-features = false }  # for packing BLE wire formats
+ssmarshal = { version = "1.0", default-features = false }                     # for packing BLE wire formats
 
 num-traits = { version = "0.2.19", default-features = false }
 
 embassy-executor = "0.9.1"
 esp-bootloader-esp-idf = "0.4.0"
-esp-hal = { version = "1.0.0", features = [ "unstable" ] }
+esp-hal = { version = "1.0.0", features = ["unstable"] }
 esp-alloc = { version = "0.9.0" }
 esp-println = { version = "0.16.0" }
 esp-radio = { version = "0.17.0", features = ["ble", "unstable"] }
-esp-rtos = { version = "0.2.0", features = ["embassy", "esp-alloc", "esp-radio"] }
+esp-rtos = { version = "0.2.0", features = [
+    "embassy",
+    "esp-alloc",
+    "esp-radio",
+] }
 trouble-host = { version = "0.5.1", features = ["default-packet-pool-mtu-255"] }
 
 # for BLE 'security' feature
-sequential-storage = { version = "7.1.0", features=["postcard"] }
+sequential-storage = { version = "7.1.0", features = ["postcard"] }
 embassy-futures = "0.1.1"
 rand_core = { version = "0.6", default-features = false }
 
 # for 'ble_bas_peripheral_bonding'
-embassy-sync = { version = "0.7" }  # used by macros
+embassy-sync = { version = "0.7" } # used by macros
 bt-hci = { version = "0.6" }
 static_cell = "2"
 
@@ -47,7 +52,7 @@ esp-storage = { version = "0.8.1" }
 
 # peripherals
 embedded-hal-nb = "1.0.0"
-usbd-hid = "0.9"  # for HID generation
+usbd-hid = "0.9"          # for HID generation
 
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 # embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
@@ -55,14 +60,22 @@ usbd-hid = "0.9"  # for HID generation
 [features]
 default = ["esp32c3", "security", "defmt"]
 
-esp32c3 = ["esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-println/esp32c3", "esp-radio/esp32c3", "esp-rtos/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3"]
+esp32c3 = [
+    "esp-hal/esp32c3",
+    "esp-backtrace/esp32c3",
+    "esp-println/esp32c3",
+    "esp-radio/esp32c3",
+    "esp-rtos/esp32c3",
+    "esp-storage/esp32c3",
+    "esp-bootloader-esp-idf/esp32c3",
+]
 
 defmt = [
     "dep:defmt",
-    "esp-backtrace/defmt", 
+    "esp-backtrace/defmt",
     "esp-alloc/defmt",
     "esp-hal/defmt",
-    "esp-println/defmt-espflash", 
+    "esp-println/defmt-espflash",
     "embassy-executor/defmt",
     "embassy-time/defmt",
     "trouble-host/defmt",
@@ -71,14 +84,12 @@ defmt = [
 log = [
     "dep:log",
     "esp-backtrace/println",
-    "esp-println/log-04", 
+    "esp-println/log-04",
     "esp-radio/log-04",
     "esp-rtos/log-04",
 ]
 
-security = [
-    "trouble-host/security",
-]
+security = ["trouble-host/security"]
 std = []
 
 [profile.dev]
@@ -87,10 +98,10 @@ std = []
 opt-level = "s"
 
 [profile.release]
-codegen-units    = 1     # LLVM can perform better optimizations using a single thread
-debug            = 2
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
 debug-assertions = false
-incremental      = false
-lto              = 'fat'
-opt-level        = 's'
-overflow-checks  = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false

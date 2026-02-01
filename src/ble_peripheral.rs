@@ -8,22 +8,19 @@ use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
+use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
 use crate::bus::{GlobalBus, StorageKey};
-use crate::ble_descriptors::{DEVICE_NAME, MouseReport, Server};
-
 
 #[cfg(feature = "defmt")]
-use defmt::{debug, info, warn, error};
+use defmt::{debug, error, info, warn};
 #[cfg(feature = "log")]
-use log::{debug, info, warn, error};
-
+use log::{debug, error, info, warn};
 
 /// Max number of connections
 const CONNECTIONS_MAX: usize = 1;
 
 /// Max number of L2CAP channels.
 const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
-
 
 #[derive(Debug, Format, Clone, Serialize, Deserialize, PartialEq)]
 struct StoredBondInformation {
@@ -44,7 +41,7 @@ impl StoredBondInformation {
                 SecurityLevel::Encrypted => 1,
                 SecurityLevel::EncryptedAuthenticated => 2,
                 SecurityLevel::NoEncryption => 0,
-        }
+            },
         }
     }
 
@@ -57,26 +54,27 @@ impl StoredBondInformation {
     }
 
     pub fn bond_info(self) -> BondInformation {
-        BondInformation { 
+        BondInformation {
             ltk: LongTermKey(self.ltk),
             identity: Identity {
                 bd_addr: BdAddr::new(self.addr),
                 irk: self.irk.map(|i| IdentityResolvingKey(i)),
             },
-            is_bonded: true, 
-            security_level: self.security_level() 
+            is_bonded: true,
+            security_level: self.security_level(),
         }
     }
 }
 
-
-static RESOURCES: StaticCell<HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>> = StaticCell::new();
+static RESOURCES: StaticCell<
+    HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>,
+> = StaticCell::new();
 
 /// Build the BLE stack, temporarily acquiring resources needed for construction
-pub fn build_stack<'a, C, TRNG>(controller: C, trng: &mut TRNG) -> Stack<'a, C, DefaultPacketPool> 
-where 
+pub fn build_stack<'a, C, TRNG>(controller: C, trng: &mut TRNG) -> Stack<'a, C, DefaultPacketPool>
+where
     C: Controller + 'a,
-    TRNG: RngCore + CryptoRng
+    TRNG: RngCore + CryptoRng,
 {
     // Using a fixed "random" address can be useful for testing. In real scenarios, one would
     // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
@@ -84,35 +82,40 @@ where
     info!("Our address = {}", address);
 
     let resources = RESOURCES.init(HostResources::new());
- 
+
     return trouble_host::new(controller, resources)
         .set_random_address(address)
-        .set_random_generator_seed(trng)
+        .set_random_generator_seed(trng);
 }
 
 /// Run the BLE stack.
-pub async fn run<'a, C>(
-    bus: &'static GlobalBus,
-    stack: &'a Stack<'a, C, DefaultPacketPool>)
+pub async fn run<'a, C>(bus: &'static GlobalBus, stack: &'a Stack<'a, C, DefaultPacketPool>)
 where
     C: Controller + 'a,
 {
     let stored_bond_info = {
         let mut storage = bus.storage.lock().await;
         let mut buf = [0u8; 128];
-        storage.fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo).await
+        storage
+            .fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo)
+            .await
             .inspect_err(|e| error!("error reading bonding info {}", defmt::Debug2Format(e)))
-            .ok().flatten()
+            .ok()
+            .flatten()
     };
     if let Some(stored_bond_info) = stored_bond_info {
         info!("Loaded bond information: {}", stored_bond_info);
-        stack.add_bond_information(stored_bond_info.bond_info()).unwrap();
+        stack
+            .add_bond_information(stored_bond_info.bond_info())
+            .unwrap();
     } else {
         info!("No bond information found");
     };
 
     let Host {
-        mut peripheral, runner, ..
+        mut peripheral,
+        runner,
+        ..
     } = stack.build();
 
     info!("Starting advertising and GATT service");
@@ -186,7 +189,10 @@ async fn gatt_events_task(
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => break reason,
             #[cfg(feature = "security")]
-            GattConnectionEvent::PairingComplete { security_level, bond } => {
+            GattConnectionEvent::PairingComplete {
+                security_level,
+                bond,
+            } => {
                 let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
                 info!("cccd {}", cccd_table);
 
@@ -195,11 +201,15 @@ async fn gatt_events_task(
                     let _ = {
                         let mut storage = bus.storage.lock().await;
                         let mut buf = [0u8; 128];
-                        storage.store_item(
-                            &mut buf, 
-                            &StorageKey::BondingInfo, 
-                            &StoredBondInformation::from_bond_info(&bond)).await
-                    }.inspect_err(|_| error!("Failed to store bond info"));
+                        storage
+                            .store_item(
+                                &mut buf,
+                                &StorageKey::BondingInfo,
+                                &StoredBondInformation::from_bond_info(&bond),
+                            )
+                            .await
+                    }
+                    .inspect_err(|_| error!("Failed to store bond info"));
                     info!("Bond information stored: {}", bond);
                 }
             }
@@ -222,7 +232,11 @@ async fn gatt_events_task(
                         None
                     }
                     GattEvent::Write(event) => {
-                        info!("[gatt] Write Event to Characteristic {}: {:?}", event.handle(), event.data());
+                        info!(
+                            "[gatt] Write Event to Characteristic {}: {:?}",
+                            event.handle(),
+                            event.data()
+                        );
 
                         #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
@@ -297,22 +311,24 @@ async fn custom_task<C: Controller, P: PacketPool>(
     stack: &Stack<'_, C, P>,
 ) {
     let mut joystick_reader = bus.joystick_state.receiver().unwrap();
-    
-    let level = server.battery_service.level;  // TODO move out
+
+    let level = server.battery_service.level; // TODO move out
     let hid_report = server.mouse_service.report;
 
     loop {
         let joystick = joystick_reader.changed().await;
 
         let report = MouseReport {
-            buttons: if joystick.btn {1} else {0},
-            x: (joystick.x / (i16::MAX/127)) as i8,
+            buttons: if joystick.btn { 1 } else { 0 },
+            x: (joystick.x / (i16::MAX / 127)) as i8,
             y: 0,
-            wheel: -(joystick.y / (i16::MAX/127)) as i8,
+            wheel: -(joystick.y / (i16::MAX / 127)) as i8,
             pan: 0,
         };
 
-        let _ = hid_report.notify(conn, &report.serialize()).await
+        let _ = hid_report
+            .notify(conn, &report.serialize())
+            .await
             .inspect_err(|e| error!("failed to notify: {}", e));
 
         // read RSSI (Received Signal Strength Indicator) of the connection.

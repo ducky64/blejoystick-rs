@@ -7,30 +7,33 @@
 )]
 
 #[cfg(feature = "defmt")]
-use defmt::{debug, info, warn, error};
+use defmt::{debug, error, info, warn};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use esp_hal::Async;
 #[cfg(feature = "log")]
-use log::{debug, info, warn, error};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
-use embassy_sync::mutex::Mutex;
+use log::{debug, error, info, warn};
 use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
 use {esp_backtrace as _, esp_println as _};
 
-
-mod ble_peripheral;
 mod ble_descriptors;
+mod ble_peripheral;
 mod bus;
 use crate::bus::{GlobalBus, JoystickState};
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
-use esp_hal::{analog::adc::{AdcPin}, clock::CpuClock, peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4}};
+use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{
+    analog::adc::AdcPin,
+    clock::CpuClock,
+    peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4},
+};
 use esp_radio::ble::controller::BleConnector;
 use trouble_host::prelude::ExternalController;
-use esp_backtrace as _;
 
 // BAS bonding imports
 use esp_hal::rng::{Trng, TrngSource};
@@ -39,8 +42,8 @@ use esp_storage::FlashStorage;
 // App-specific imports
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    gpio::{Input, InputConfig, Pull, Level, Output, OutputConfig},
-    analog::adc::{AdcConfig, Adc, Attenuation},
+    analog::adc::{Adc, AdcConfig, Attenuation},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
 };
 
 extern crate alloc;
@@ -49,9 +52,8 @@ extern crate alloc;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-
-static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>> = StaticCell::new();
-
+static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>> =
+    StaticCell::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -63,7 +65,8 @@ async fn main(spawner: Spawner) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     #[cfg(target_arch = "riscv32")]
-    let software_interrupt = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let software_interrupt =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
 
     esp_rtos::start(
         timg0.timer0,
@@ -71,8 +74,10 @@ async fn main(spawner: Spawner) {
         software_interrupt.software_interrupt0,
     );
 
-    info!("report length = {}", 
-        <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
+    info!(
+        "report length = {}",
+        <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len()
+    );
 
     // initialize global state and shared peripherals
     let flash = FlashStorage::new(peripherals.FLASH);
@@ -91,7 +96,10 @@ async fn main(spawner: Spawner) {
 
     // initialize IO
     let led = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
-    let button = Input::new(peripherals.GPIO6, InputConfig::default().with_pull(Pull::Up));
+    let button = Input::new(
+        peripherals.GPIO6,
+        InputConfig::default().with_pull(Pull::Up),
+    );
 
     let mut adc_config = AdcConfig::new();
     let x_pin = adc_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
@@ -110,9 +118,11 @@ async fn main(spawner: Spawner) {
     ble_peripheral::run(bus, &stack).await;
 }
 
-
 fn scale_adc_bipolar<InType, ResultType, IntermediateType>(
-    adc_value: InType, center: InType, fullscale: InType, deadzone: InType
+    adc_value: InType,
+    center: InType,
+    fullscale: InType,
+    deadzone: InType,
 ) -> ResultType
 where
     InType: PrimInt + AsPrimitive<IntermediateType>,
@@ -130,13 +140,14 @@ where
         IntermediateType::zero() - (center_i - deadzone_i - adc_i)
     } else {
         IntermediateType::zero()
-    } * ResultType::max_value().as_() / scale_except_deadzone;
+    } * ResultType::max_value().as_()
+        / scale_except_deadzone;
 
     return ResultType::from(
-        result.clamp(ResultType::min_value().as_(), ResultType::max_value().as_())
-    ).unwrap_or(ResultType::zero());
+        result.clamp(ResultType::min_value().as_(), ResultType::max_value().as_()),
+    )
+    .unwrap_or(ResultType::zero());
 }
-
 
 // the ADC API seems to be a bit of a dumpster fire
 // https://github.com/esp-rs/esp-hal/issues/449
@@ -145,27 +156,33 @@ where
 // so for now, the GPIO # is hardcoded instead of generic, yuck!
 #[embassy_executor::task]
 async fn read_ui(
-        bus: &'static GlobalBus,
-        adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>, 
-        mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
-        button: Input<'static>,
-        mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
+    bus: &'static GlobalBus,
+    adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
+    mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>,
+    mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>,
+    button: Input<'static>,
+    mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>,
+) {
     const CENTER_X: u16 = 2610;
     const CENTER_Y: u16 = 2650;
-    const FULLSCALE_XY: u16 = 1000;  // adc counts for full scale, half-span
-    const DEADZONE_XY: u16 = 32;  // in ADC counts, half-span
+    const FULLSCALE_XY: u16 = 1000; // adc counts for full scale, half-span
+    const DEADZONE_XY: u16 = 32; // in ADC counts, half-span
 
     let josytick_state_sender = bus.joystick_state.sender();
     loop {
         let (x_adc, y_adc, trig_adc) = {
             let mut adc = adc_mutex.lock().await;
-            (adc.read_oneshot(&mut x_pin).await,
-            adc.read_oneshot(&mut y_pin).await,
-            adc.read_oneshot(&mut trig_pin).await)
+            (
+                adc.read_oneshot(&mut x_pin).await,
+                adc.read_oneshot(&mut y_pin).await,
+                adc.read_oneshot(&mut trig_pin).await,
+            )
         };
         let btn_value = button.is_low();
-        debug!("JX {}    JY {}    Btn {}    Tr {}",
-            x_adc, y_adc, btn_value, trig_adc);
+        debug!(
+            "JX {}    JY {}    Btn {}    Tr {}",
+            x_adc, y_adc, btn_value, trig_adc
+        );
 
         let joystick_state = JoystickState {
             x: scale_adc_bipolar::<u16, i16, i32>(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY),
@@ -179,9 +196,10 @@ async fn read_ui(
 
 #[embassy_executor::task]
 async fn read_bat(
-        bus: &'static GlobalBus,
-        adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>, 
-        mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
+    bus: &'static GlobalBus,
+    adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
+    mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>,
+) {
     let vbus_sender = bus.vbat.sender();
     loop {
         let vbat_value = {
@@ -189,16 +207,15 @@ async fn read_bat(
             adc.read_oneshot(&mut vbat_pin).await
         };
         debug!("read vbat {}", vbat_value);
-        vbus_sender.send(vbat_value);  // TODO SCALING
+        vbus_sender.send(vbat_value); // TODO SCALING
         Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
-
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>) {
     loop {
-        led.set_high();  // LED off
+        led.set_high(); // LED off
         Timer::after(Duration::from_millis(250)).await;
         led.set_low();
         Timer::after(Duration::from_millis(250)).await;

@@ -1,17 +1,14 @@
+use serde::Serialize;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::descriptor::SerializedDescriptor;
-use serde::Serialize;
-
 
 #[cfg(feature = "defmt")]
-use defmt::{debug, info, warn, error};
+use defmt::{debug, error, info, warn};
 #[cfg(feature = "log")]
-use log::{debug, info, warn, error};
-
+use log::{debug, error, info, warn};
 
 pub const DEVICE_NAME: &str = "Ducky RingJoystick";
-
 
 #[gatt_service(uuid = service::DEVICE_INFORMATION)]
 pub(crate) struct DeviceInformationService {
@@ -23,7 +20,6 @@ pub(crate) struct DeviceInformationService {
     pub pnp_id: [u8; 7],
 }
 
-
 #[gatt_service(uuid = service::BATTERY)]
 pub(crate) struct BatteryService {
     /// Battery Level
@@ -33,16 +29,14 @@ pub(crate) struct BatteryService {
     pub(crate) level: u8,
 }
 
-
 // The characteristic buffer length for the descriptor must exactly match the descriptor length,
 // or it will crash before main starts.
 // As of usbd-hid 0.9.0, the descriptor is not available at compiler time.
 // Workaround: get the length at runtime, then update the code
 // - in main, before the BLE stack starts (and crashes), print the length, for example
-//     info!("report length = {}", 
+//     info!("report length = {}",
 //         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
 // - paste the result into the characteristic buffer length
-
 
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = MOUSE) = {
@@ -84,19 +78,17 @@ impl MouseReport {
 
     pub fn serialize(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
-        let _ = ssmarshal::serialize(&mut buf, self)
-            .inspect_err(|_| error!("failed to serialize"));
+        let _ = ssmarshal::serialize(&mut buf, self).inspect_err(|_| error!("failed to serialize"));
         buf
     }
 }
-
 
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct MouseService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
     pub(crate) hid_info: [u8; 4],
     #[characteristic(uuid = "2a4b", read, value = MouseReport::desc().try_into().expect("Failed to serialize CompositeReport"))]
-    pub(crate) report_map: [u8; 60],  // IMPORTANT: length MUST EXACTLY equal the descriptor size, see note at top of file
+    pub(crate) report_map: [u8; 60], // IMPORTANT: length MUST EXACTLY equal the descriptor size, see note at top of file
     #[characteristic(uuid = "2a4c", write_without_response)]
     pub(crate) hid_control_point: u8,
     #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
@@ -105,7 +97,6 @@ pub(crate) struct MouseService {
     #[characteristic(uuid = "2a4d", read, notify)]
     pub(crate) report: [u8; MouseReport::SIZE],
 }
-
 
 // GATT Server definition
 #[gatt_server]
