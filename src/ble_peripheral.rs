@@ -51,6 +51,14 @@ impl StoredBondInformation {
         }
     }
 
+    pub fn with_cccd<const ENTRIES: usize>(&self, cccd: &CccdTable<ENTRIES>) -> Self {
+        let mut new = self.clone();
+        for (handle, value) in cccd.inner().iter() {
+            new.cccds.0.insert(*handle, value.raw()).ok();
+        }
+        new
+    }
+
     pub fn security_level(&self) -> SecurityLevel {
         match self.security_level {
             1 => SecurityLevel::Encrypted,
@@ -68,6 +76,22 @@ impl StoredBondInformation {
             },
             is_bonded: true,
             security_level: self.security_level(),
+        }
+    }
+
+    pub fn cccd<const ENTRIES: usize>(&self) -> Option<CccdTable<ENTRIES>> {
+        if self.cccds.0.is_empty() {
+            None
+        } else {
+            let mut entries = [(0u16, CCCD::default()); ENTRIES];
+            for (i, (handle, value)) in self.cccds.0.iter().enumerate() {
+                if i >= ENTRIES {
+                    error!("StoredBondInformation cccd has more entries than can fit in CccdTable");
+                    break;
+                }
+                entries[i] = (*handle, CCCD::from(*value));
+            }
+            Some(CccdTable::new(entries))
         }
     }
 }
@@ -190,7 +214,7 @@ async fn gatt_events_task(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
 ) -> Result<(), Error> {
-    let stored_bond_info = {
+    let mut stored_bond_info = {
         let mut storage = bus.storage.lock().await;
         let mut buf = [0u8; 128];
         storage
@@ -208,8 +232,18 @@ async fn gatt_events_task(
     };
     info!("[gatt] loaded stored bond info: {:?}", stored_bond_info);
 
+    // TODO delay restoring cccd until encryption confirmed
+    stored_bond_info.as_ref().map(|stored_bond_info| {
+        stored_bond_info.cccd().map(|cccd| {
+            info!("[gatt] restored cccd table: {}", cccd);
+            server.set_cccd_table(conn.raw(), cccd)
+        })
+    });
+
     let reason = loop {
         let conn_event = conn.next().await;
+        let mut new_stored_bond_info: Option<StoredBondInformation> = None;
+
         match conn_event {
             GattConnectionEvent::Disconnected { reason } => {
                 info!("[gatt] disconnected: {}", reason);
@@ -220,24 +254,9 @@ async fn gatt_events_task(
                 security_level,
                 bond,
             } => {
-                let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
-                info!("cccd {}", cccd_table);
-
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    let _ = {
-                        let mut storage = bus.storage.lock().await;
-                        let mut buf = [0u8; 128];
-                        storage
-                            .store_item(
-                                &mut buf,
-                                &StorageKey::BondingInfo,
-                                &StoredBondInformation::from_bond_info(&bond),
-                            )
-                            .await
-                    }
-                    .inspect_err(|_| error!("Failed to store bond info"));
-                    info!("Bond information stored: {}", bond);
+                    new_stored_bond_info = Some(StoredBondInformation::from_bond_info(&bond));
                 }
             }
             #[cfg(feature = "security")]
@@ -265,6 +284,11 @@ async fn gatt_events_task(
                             event.data()
                         );
 
+                        if let Some(stored_bond_info) = stored_bond_info.as_ref() {
+                            let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
+                            new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
+                        }
+
                         #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
                             None
@@ -288,6 +312,26 @@ async fn gatt_events_task(
                 }
             }
             _ => {} // ignore other Gatt Connection Events
+        }
+
+        if let Some(updated_bond_info) = new_stored_bond_info.as_ref() {
+            // check for a potential bond change
+            if Some(updated_bond_info) == stored_bond_info.as_ref() {
+                continue; // data not changed
+            }
+            let result = {
+                let mut storage = bus.storage.lock().await;
+                let mut buf = [0u8; 128];
+                storage
+                    .store_item(&mut buf, &StorageKey::BondingInfo, updated_bond_info)
+                    .await
+            };
+            if result.is_ok() {
+                info!("[gatt] wrote updated bond info: {}", updated_bond_info);
+                stored_bond_info = new_stored_bond_info;
+            } else {
+                error!("[gatt] failed to write updated bond info")
+            }
         }
     };
     info!("[gatt] disconnected: {:?}", reason);
