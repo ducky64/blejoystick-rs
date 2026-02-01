@@ -16,7 +16,10 @@ pub struct JoystickState {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Format, FromRepr)]
 #[repr(u8)]
 pub enum StorageKey {
-    BondingInfo = 0,
+    // 0 is reserved
+    BondingInfo = 1,
+
+    Unknown = 127,
 }
 
 impl Key for StorageKey {
@@ -37,7 +40,7 @@ impl Key for StorageKey {
         if let Some(key) = key {
           Ok((key, 1))
         } else {
-          Err(SerializationError::InvalidData)
+          Ok((StorageKey::Unknown, 1))
         }
     }
 
