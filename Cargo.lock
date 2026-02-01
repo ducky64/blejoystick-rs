@@ -124,7 +124,6 @@ dependencies = [
  "esp-storage",
  "log",
  "num-traits",
- "postcard",
  "rand_core 0.6.4",
  "sequential-storage",
  "serde",
