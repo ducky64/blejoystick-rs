@@ -80,7 +80,7 @@ async fn main(spawner: Spawner) {
         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
 
     // initialize global state and shared peripherals
-    let mut flash = BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
+    let flash = BlockingAsync::new(FlashStorage::new(peripherals.FLASH));
     let storage = MapStorage::<u8, BlockingAsync<FlashStorage<'static>>, NoCache>::new(
         flash, 
         const { MapConfig::new(0x10_0000..0x12_0000) }, 

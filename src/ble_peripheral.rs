@@ -1,12 +1,13 @@
+use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
 use rand_core::{CryptoRng, RngCore};
-use sequential_storage::map::{Key, SerializationError, Value};
+use sequential_storage::map::{SerializationError, Value};
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
-use crate::bus::GlobalBus;
+use crate::bus::{GlobalBus, StorageKey};
 use crate::ble_descriptors::{DEVICE_NAME, MouseReport, Server};
 
 
@@ -23,7 +24,7 @@ const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Format, Clone, Serialize, Deserialize)]
 struct StoredBondInformation {
     addr: [u8; 6],
     ltk: u128,
@@ -32,12 +33,12 @@ struct StoredBondInformation {
 }
 
 impl StoredBondInformation {
-    pub fn new(addr: BdAddr, ltk: LongTermKey, irk: Option<IdentityResolvingKey>, security_level: SecurityLevel) -> Self {
+    pub fn from_bond_info(bond_info: &BondInformation) -> Self {
         Self {
-            addr: addr.raw().try_into().unwrap(),
-            ltk: ltk.0,
-            irk: irk.map(|i| i.0),
-            security_level: match security_level {
+            addr: bond_info.identity.bd_addr.raw().try_into().unwrap(),
+            ltk: bond_info.ltk.0,
+            irk: bond_info.identity.irk.map(|i| i.0),
+            security_level: match bond_info.security_level {
                 SecurityLevel::Encrypted => 1,
                 SecurityLevel::EncryptedAuthenticated => 2,
                 SecurityLevel::NoEncryption => 0,
@@ -45,15 +46,6 @@ impl StoredBondInformation {
         }
     }
 
-    pub fn addr(self) -> BdAddr {
-        BdAddr::new(self.addr)
-    }
-    pub fn ltk(self) -> LongTermKey {
-        LongTermKey(self.ltk)
-    }
-    pub fn irk(self) -> Option<IdentityResolvingKey> {
-        self.irk.map(|i| IdentityResolvingKey(i))
-    }
     pub fn security_level(self) -> SecurityLevel {
         match self.security_level {
             1 => SecurityLevel::Encrypted,
@@ -61,54 +53,36 @@ impl StoredBondInformation {
             _ => SecurityLevel::NoEncryption,
         }
     }
+
+    pub fn bond_info(self) -> BondInformation {
+        BondInformation { 
+            ltk: LongTermKey(self.ltk),
+            identity: Identity {
+                bd_addr: BdAddr::new(self.addr),
+                irk: self.irk.map(|i| IdentityResolvingKey(i)),
+            },
+            is_bonded: true, 
+            security_level: self.security_level() 
+        }
+    }
 }
 
+impl<'a> Value<'a> for StoredBondInformation {
+    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
+        postcard::to_slice(self, buffer)
+            .map(|v| v.len())
+            .map_err(|_| SerializationError::Custom(0))
+    }
 
-// fn flash_range<S: NorFlash>() -> Range<u32> {
-//     let start_addr = 0x10_0000;
-//     start_addr..(start_addr + 16 * S::ERASE_SIZE as u32)
-// }
+    fn deserialize_from(buffer: &'a [u8]) -> Result<(Self, usize), SerializationError>
+    where
+        Self: Sized {
+        postcard::take_from_bytes(buffer)
+            .map(|(v, rest)| (v, buffer.len() - rest.len()))
+            .map_err(|_| SerializationError::Custom(0))
+    }
+}
 
-// async fn store_bonding_info<S: NorFlash>(
-//     storage: &mut S,
-//     info: &BondInformation,
-// ) -> Result<(), sequential_storage::Error<S::Error>> {
-//     sequential_storage::erase_all(storage, flash_range::<S>()).await?;
-//     let mut buffer = [0; 64];
-//     let key = StoredAddr(info.identity.bd_addr);
-//     let value = StoredBondInformation {
-//         ltk: info.ltk,
-//         irk: info.identity.irk,
-//         security_level: info.security_level,
-//     };
-//     sequential_storage::map::store_item(storage, flash_range::<S>(), &mut NoCache::new(), &mut buffer, &key, &value).await?;
-//     Ok(())
-// }
-
-// async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
-//     let mut buffer = [0; 64];
-//     let mut cache = NoCache::new();
-//     let mut iter = sequential_storage::map::fetch_all_items::<StoredAddr, _, _>(
-//         storage,
-//         flash_range::<S>(),
-//         &mut cache,
-//         &mut buffer,
-//     )
-//     .await
-//     .ok()?;
-//     while let Some((key, value)) = iter.next::<StoredBondInformation>(&mut buffer).await.ok()? {
-//         return Some(BondInformation {
-//             identity: Identity {
-//                 bd_addr: key.0,
-//                 irk: value.irk,
-//             },
-//             security_level: value.security_level,
-//             is_bonded: true,
-//             ltk: value.ltk,
-//         });
-//     }
-//     None
-// }
 
 static RESOURCES: StaticCell<HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>> = StaticCell::new();
 
@@ -137,12 +111,17 @@ pub async fn run<'a, C>(
 where
     C: Controller + 'a,
 {
-    // if let Some(bond_info) = load_bonding_info(storage).await {
-    //     info!("Loaded bond information: {}", bond_info);
-    //     stack.add_bond_information(bond_info).unwrap();
-    // } else {
-    //     info!("No bond information found");
-    // };
+    let stored_bond_info = {
+        let mut storage = bus.storage.lock().await;
+        let mut buf = [0u8; 128];
+        storage.fetch_item::<StoredBondInformation>(&mut buf, &(StorageKey::BondingInfo as u8)).await.unwrap()
+    };
+    if let Some(stored_bond_info) = stored_bond_info {
+        info!("Loaded bond information: {}", stored_bond_info);
+        stack.add_bond_information(stored_bond_info.bond_info()).unwrap();
+    } else {
+        info!("No bond information found");
+    };
 
     let Host {
         mut peripheral, runner, ..
@@ -225,7 +204,11 @@ async fn gatt_events_task(
 
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    // store_bonding_info(storage, &bond).await.unwrap();
+                    let _ = {
+                        let mut storage = bus.storage.lock().await;
+                        let mut buf = [0u8; 128];
+                        storage.store_item(&mut buf, &(StorageKey::BondingInfo as u8), &StoredBondInformation::from_bond_info(&bond)).await
+                    }.inspect_err(|_| error!("Failed to store bond info"));
                     info!("Bond information stored: {}", bond);
                 }
             }
