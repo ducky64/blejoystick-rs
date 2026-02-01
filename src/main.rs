@@ -6,14 +6,12 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use core::cell::RefCell;
-
 #[cfg(feature = "defmt")]
 use defmt::{debug, info, warn, error};
 #[cfg(feature = "log")]
 use log::{debug, info, warn, error};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex};
-use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::mutex::Mutex;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use sequential_storage::map::{MapStorage, MapConfig};
 use sequential_storage::cache::NoCache;
@@ -55,7 +53,7 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 
-static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>> = StaticCell::new();
+static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Blocking>>> = StaticCell::new();
 
 
 #[esp_rtos::main]
@@ -109,7 +107,7 @@ async fn main(spawner: Spawner) {
     let vbat_pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
 
     let adc = Adc::new(peripherals.ADC1, adc_config);
-    let adc_mutex = ADC_MUTEX.init(Mutex::new(adc.into()));
+    let adc_mutex = ADC_MUTEX.init(Mutex::new(adc));
 
     // build and run tasks
     spawner.must_spawn(blinky(led));
@@ -155,7 +153,7 @@ where
 #[embassy_executor::task]
 async fn read_ui(
         bus: &'static GlobalBus,
-        adc_mutex: &'static Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
+        adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Blocking>>, 
         mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>, mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>, 
         button: Input<'static>,
         mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>) {
@@ -166,13 +164,13 @@ async fn read_ui(
 
     let josytick_state_sender = bus.joystick_state.sender();
     loop {
-        let x_adc = adc_mutex.lock(|adc| 
-            nb::block!(adc.borrow_mut().read_oneshot(&mut x_pin)).unwrap());
-        let y_adc = adc_mutex.lock(|adc| 
-            nb::block!(adc.borrow_mut().read_oneshot(&mut y_pin)).unwrap());
+        let (x_adc, y_adc, trig_adc) = {
+            let mut adc = adc_mutex.lock().await;
+            (nb::block!(adc.read_oneshot(&mut x_pin)).unwrap(),
+            nb::block!(adc.read_oneshot(&mut y_pin)).unwrap(),
+            nb::block!(adc.read_oneshot(&mut trig_pin)).unwrap())
+        };
         let btn_value = button.is_low();
-        let trig_adc = adc_mutex.lock(|adc| 
-            nb::block!(adc.borrow_mut().read_oneshot(&mut trig_pin)).unwrap());
         debug!("JX {}    JY {}    Btn {}    Tr {}",
             x_adc, y_adc, btn_value, trig_adc);
 
@@ -189,12 +187,14 @@ async fn read_ui(
 #[embassy_executor::task]
 async fn read_bat(
         bus: &'static GlobalBus,
-        adc_mutex: &'static Mutex<CriticalSectionRawMutex, RefCell<Adc<'static, ADC1<'static>, Blocking>>>, 
+        adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Blocking>>, 
         mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>) {
     let vbus_sender = bus.vbat.sender();
     loop {
-        let vbat_value = adc_mutex.lock(|adc| 
-            nb::block!(adc.borrow_mut().read_oneshot(&mut vbat_pin)).unwrap());
+        let vbat_value = {
+            let mut adc = adc_mutex.lock().await;
+            nb::block!(adc.read_oneshot(&mut vbat_pin)).unwrap()
+        };
         debug!("read vbat {}", vbat_value);
         vbus_sender.send(vbat_value);  // TODO SCALING
         Timer::after(Duration::from_millis(1000)).await;
