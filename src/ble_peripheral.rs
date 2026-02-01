@@ -2,13 +2,14 @@ use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
 use rand_core::{CryptoRng, RngCore};
-use sequential_storage::map::{SerializationError, Value};
+
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
 use crate::bus::{GlobalBus, StorageKey};
 use crate::ble_descriptors::{DEVICE_NAME, MouseReport, Server};
+use crate::serialization_util::StorageSerde;
 
 
 #[cfg(feature = "defmt")]
@@ -67,22 +68,6 @@ impl StoredBondInformation {
     }
 }
 
-impl<'a> Value<'a> for StoredBondInformation {
-    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        postcard::to_slice(self, buffer)
-            .map(|v| v.len())
-            .map_err(|_| SerializationError::Custom(0))
-    }
-
-    fn deserialize_from(buffer: &'a [u8]) -> Result<(Self, usize), SerializationError>
-    where
-        Self: Sized {
-        postcard::take_from_bytes(buffer)
-            .map(|(v, rest)| (v, buffer.len() - rest.len()))
-            .map_err(|_| SerializationError::Custom(0))
-    }
-}
-
 
 static RESOURCES: StaticCell<HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>> = StaticCell::new();
 
@@ -114,11 +99,11 @@ where
     let stored_bond_info = {
         let mut storage = bus.storage.lock().await;
         let mut buf = [0u8; 128];
-        storage.fetch_item::<StoredBondInformation>(&mut buf, &(StorageKey::BondingInfo as u8)).await.unwrap()
+        storage.fetch_item::<StorageSerde<StoredBondInformation>>(&mut buf, &(StorageKey::BondingInfo as u8)).await.unwrap()
     };
     if let Some(stored_bond_info) = stored_bond_info {
-        info!("Loaded bond information: {}", stored_bond_info);
-        stack.add_bond_information(stored_bond_info.bond_info()).unwrap();
+        info!("Loaded bond information: {}", stored_bond_info.0);
+        stack.add_bond_information(stored_bond_info.0.bond_info()).unwrap();
     } else {
         info!("No bond information found");
     };
@@ -207,7 +192,10 @@ async fn gatt_events_task(
                     let _ = {
                         let mut storage = bus.storage.lock().await;
                         let mut buf = [0u8; 128];
-                        storage.store_item(&mut buf, &(StorageKey::BondingInfo as u8), &StoredBondInformation::from_bond_info(&bond)).await
+                        storage.store_item(
+                            &mut buf, 
+                            &(StorageKey::BondingInfo as u8), 
+                            &StorageSerde(StoredBondInformation::from_bond_info(&bond))).await
                     }.inspect_err(|_| error!("Failed to store bond info"));
                     info!("Bond information stored: {}", bond);
                 }
