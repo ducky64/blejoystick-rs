@@ -114,7 +114,6 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-hal-nb",
- "embedded-storage-async",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -1774,6 +1773,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4580ee0fa08cd41bee9f5b50ed309877e18735370fd4eef5766cc82863ef772"
 dependencies = [
  "embedded-storage-async",
+ "postcard",
+ "serde",
 ]
 
 [[package]]
