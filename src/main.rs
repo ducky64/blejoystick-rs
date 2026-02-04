@@ -18,6 +18,7 @@ use static_cell::StaticCell;
 
 use {esp_backtrace as _, esp_println as _};
 
+use usbd_hid::descriptor::SerializedDescriptor;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
@@ -76,8 +77,9 @@ async fn main(spawner: Spawner) {
     );
 
     info!(
-        "report length = {}",
-        <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len()
+        "descriptor ({}) {:02x}",
+        ble_descriptors::MouseReport::desc().len(),
+        ble_descriptors::MouseReport::desc()
     );
 
     // initialize global state and shared peripherals
@@ -191,7 +193,7 @@ async fn read_ui(
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
-        Timer::after(Duration::from_millis(10)).await;
+        Timer::after(Duration::from_millis(50)).await;
     }
 }
 

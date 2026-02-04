@@ -1,4 +1,3 @@
-use serde::Serialize;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::descriptor::SerializedDescriptor;
@@ -30,7 +29,7 @@ pub(crate) struct BatteryService {
 }
 
 // The characteristic buffer length for the descriptor must exactly match the descriptor length,
-// or it will crash before main starts.
+// or it will crash when the BLE stack starts.
 // As of usbd-hid 0.9.0, the descriptor is not available at compiler time.
 // Workaround: get the length at runtime, then update the code
 // - in main, before the BLE stack starts (and crashes), print the length, for example
@@ -42,22 +41,27 @@ pub(crate) struct BatteryService {
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = MOUSE) = {
         (collection = PHYSICAL, usage = POINTER) = {
             (usage_page = BUTTON, usage_min = BUTTON_1, usage_max = BUTTON_8) = {
-                #[packed_bits 8] #[item_settings data,variable,absolute] buttons=input;
+                #[packed_bits = 8] #[item_settings(data,variable,absolute)] buttons=input;
             };
             (usage_page = GENERIC_DESKTOP,) = {
                 (usage = X,) = {
-                    #[item_settings data,variable,relative] x=input;
+                    #[item_settings(data,variable,relative)] x=input;
                 };
                 (usage = Y,) = {
-                    #[item_settings data,variable,relative] y=input;
+                    #[item_settings(data,variable,relative)] y=input;
+                };
+            };
+            (collection = LOGICAL, usage_page = GENERIC_DESKTOP) = {
+                (usage = 0x48,) = {
+                    #[item_settings(data,variable,absolute)] resolution=feature;
                 };
                 (usage = WHEEL,) = {
-                    #[item_settings data,variable,relative] wheel=input;
+                    #[item_settings(data,variable,relative)] wheel=input;
                 };
             };
             (usage_page = CONSUMER,) = {
                 (usage = AC_PAN,) = {
-                    #[item_settings data,variable,relative] pan=input;
+                    #[item_settings(data,variable,relative)] pan=input;
                 };
             };
         };
@@ -69,26 +73,22 @@ pub struct MouseReport {
     pub buttons: u8,
     pub x: i8,
     pub y: i8,
+    pub resolution: i8,
     pub wheel: i8, // Scroll down (negative) or up (positive) this many units
     pub pan: i8,   // Scroll left (negative) or right (positive) this many units
 }
 
 impl MouseReport {
     pub const SIZE: usize = core::mem::size_of::<MouseReport>();
-
-    pub fn serialize(&self) -> [u8; Self::SIZE] {
-        let mut buf = [0u8; Self::SIZE];
-        let _ = ssmarshal::serialize(&mut buf, self).inspect_err(|_| error!("failed to serialize"));
-        buf
-    }
+    pub const DESC_SIZE: usize = MouseReport::DESC.len(); //69; // IMPORTANT: length MUST EXACTLY equal the descriptor size, see note at top of file
 }
 
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct MouseService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
     pub(crate) hid_info: [u8; 4],
-    #[characteristic(uuid = "2a4b", read, value = MouseReport::desc().try_into().expect("Failed to serialize CompositeReport"))]
-    pub(crate) report_map: [u8; 60], // IMPORTANT: length MUST EXACTLY equal the descriptor size, see note at top of file
+    #[characteristic(uuid = "2a4b", read, value = MouseReport::DESC)]
+    pub(crate) report_map: [u8; MouseReport::DESC_SIZE],
     #[characteristic(uuid = "2a4c", write_without_response)]
     pub(crate) hid_control_point: u8,
     #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]

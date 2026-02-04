@@ -8,6 +8,7 @@ use sequential_storage::map::PostcardValue;
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
+use usbd_hid::descriptor::AsInputReport;
 
 use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
 use crate::bus::{GlobalBus, StorageKey};
@@ -395,10 +396,13 @@ async fn custom_task<C: Controller, P: PacketPool>(
             y: 0,
             wheel: -(joystick.y / (i16::MAX / 127)) as i8,
             pan: 0,
+            resolution: 64,
         };
 
+        let mut buf = [0u8; MouseReport::SIZE];
+        report.serialize(&mut buf).unwrap();
         let _ = hid_report
-            .notify(conn, &report.serialize())
+            .notify(conn, &buf)
             .await
             .inspect_err(|e| error!("failed to notify: {}", e));
 
