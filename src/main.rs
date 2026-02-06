@@ -211,7 +211,7 @@ async fn read_ui(
 
         let btn_value = button.is_low();
 
-        trace!(
+        debug!(
             "JX {}    JY {}    Btn {}    Tr {}",
             x_linear,
             y_linear,
