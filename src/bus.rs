@@ -2,6 +2,7 @@ use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
 use esp_storage::FlashStorage;
+use fixed::types::I1F15;
 use sequential_storage::{
     cache::NoCache,
     map::{Key, MapConfig, MapStorage, SerializationError},
@@ -11,8 +12,8 @@ use strum::FromRepr;
 
 #[derive(Clone, Copy, Default)]
 pub struct JoystickState {
-    pub x: i16, // up-scaled to i16, deadzone pre-applied
-    pub y: i16,
+    pub x: I1F15,
+    pub y: I1F15,
     pub btn: bool,
 }
 

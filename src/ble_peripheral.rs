@@ -1,6 +1,8 @@
 use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
+use embassy_time::{Duration, Instant};
+use fixed::types::{I16F16, I1F15};
 use heapless::LinearMap;
 use rand_core::{CryptoRng, RngCore};
 
@@ -368,6 +370,35 @@ async fn advertise<'values, 'server, C: Controller>(
     Ok(conn)
 }
 
+// Given some absolute input (eg, joystick), produce a time-relative output (eg, mouse movement) by accumulating the input
+// and producing output ticks when a threshold is passed.
+pub struct RelativeAccummulator {
+    accum: I16F16,
+    ticks_per_second: I16F16, // if the input is constant 1, this many ticks are produced per second
+}
+
+impl RelativeAccummulator {
+    pub fn new(ticks_per_second: I16F16) -> Self {
+        Self {
+            accum: I16F16::ZERO,
+            ticks_per_second: ticks_per_second,
+        }
+    }
+
+    pub fn update(&mut self, input: I1F15, dt: Duration) -> i8 {
+        self.accum += I16F16::from_num(input)
+            * (self.ticks_per_second * I16F16::saturating_from_num(dt.as_millis()) / 1000);
+        let output = self.accum.to_num::<i8>();
+        self.accum -= I16F16::from_num(output);
+        output
+    }
+}
+
+fn sensitivity_mapping(input: I1F15) -> I1F15 {
+    // a sensitivity mapping that is finer near the center but allows full-range at max
+    input / 2 + input * input.abs() / 2
+}
+
 /// Example task to use the BLE notifier interface.
 /// This task will notify the connected central of a counter value every 2 seconds.
 /// It will also read the RSSI value every 2 seconds.
@@ -383,14 +414,28 @@ async fn custom_task<C: Controller, P: PacketPool>(
     let level = server.battery_service.level; // TODO move out
     let hid_report = server.mouse_service.report;
 
+    let mut last_tick = Instant::now();
+    let mut x_accum = RelativeAccummulator::new(I16F16::from_num(1023)); // at max input, produce 7 ticks per second
+    let mut y_accum = RelativeAccummulator::new(I16F16::from_num(63)); // at max input, produce 7 ticks per second
+
     loop {
         let joystick = joystick_reader.changed().await;
+        let now = Instant::now();
+        let dt = now - last_tick;
+        last_tick = now;
+
+        let x_delta = x_accum.update(sensitivity_mapping(joystick.x), dt);
+        let y_delta = y_accum.update(sensitivity_mapping(joystick.y), dt);
+        if x_delta == 0 && y_delta == 0 {
+            // don't send empty packet
+            continue;
+        }
 
         let report = MouseReport {
             buttons: if joystick.btn { 1 } else { 0 },
-            x: (joystick.x / (i16::MAX / 127)) as i8,
+            x: x_delta,
             y: 0,
-            wheel: -(joystick.y / (i16::MAX / 127)) as i8,
+            wheel: -y_delta,
             pan: 0,
         };
 

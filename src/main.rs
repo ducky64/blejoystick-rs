@@ -213,19 +213,16 @@ async fn read_ui(
 
         debug!(
             "JX {}    JY {}    Btn {}    Tr {}",
-            x_linear,
-            y_linear,
-            btn_value,
-            trig_adc
+            x_linear, y_linear, btn_value, trig_adc
         );
 
         let joystick_state = JoystickState {
-            x: x_linear.to_bits(),
-            y: y_linear.to_bits(),
+            x: x_linear,
+            y: y_linear,
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
-        Timer::after(Duration::from_millis(50)).await;
+        Timer::after(Duration::from_millis(20)).await;
     }
 }
 
