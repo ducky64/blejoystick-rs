@@ -2,11 +2,6 @@ use trouble_host::prelude::*;
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::descriptor::SerializedDescriptor;
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, error, info, warn};
-#[cfg(feature = "log")]
-use log::{debug, error, info, warn};
-
 pub const DEVICE_NAME: &str = "Ducky RingJoystick";
 
 #[gatt_service(uuid = service::DEVICE_INFORMATION)]
@@ -50,11 +45,6 @@ pub(crate) struct BatteryService {
                 (usage = Y,) = {
                     #[item_settings(data,variable,relative)] y=input;
                 };
-            };
-            (collection = LOGICAL, usage_page = GENERIC_DESKTOP) = {
-                (usage = 0x48,) = {
-                    #[item_settings(data,variable,absolute)] resolution=feature;
-                };
                 (usage = WHEEL,) = {
                     #[item_settings(data,variable,relative)] wheel=input;
                 };
@@ -73,7 +63,6 @@ pub struct MouseReport {
     pub buttons: u8,
     pub x: i8,
     pub y: i8,
-    pub resolution: i8,
     pub wheel: i8, // Scroll down (negative) or up (positive) this many units
     pub pan: i8,   // Scroll left (negative) or right (positive) this many units
 }

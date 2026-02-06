@@ -12,12 +12,8 @@ use usbd_hid::descriptor::AsInputReport;
 
 use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
 use crate::bus::{GlobalBus, StorageKey};
+use crate::prelude::*;
 use crate::util::FormatLinearMap;
-
-#[cfg(feature = "defmt")]
-use defmt::{debug, error, info, warn};
-#[cfg(feature = "log")]
-use log::{debug, error, info, warn};
 
 /// Max number of connections
 const CONNECTIONS_MAX: usize = 1;
@@ -396,7 +392,6 @@ async fn custom_task<C: Controller, P: PacketPool>(
             y: 0,
             wheel: -(joystick.y / (i16::MAX / 127)) as i8,
             pan: 0,
-            resolution: 64,
         };
 
         let mut buf = [0u8; MouseReport::SIZE];

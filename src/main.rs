@@ -6,13 +6,9 @@
     holding buffers for the duration of a data transfer."
 )]
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, error, info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use esp_hal::Async;
-#[cfg(feature = "log")]
-use log::{debug, error, info, warn};
 use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
@@ -22,8 +18,10 @@ use usbd_hid::descriptor::SerializedDescriptor;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
+mod prelude;
 mod util;
 use crate::bus::{GlobalBus, JoystickState};
+use crate::prelude::*;
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
