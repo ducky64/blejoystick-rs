@@ -20,7 +20,7 @@ strum = { version = "0.27", features = ["derive"], default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
 ssmarshal = { version = "1.0", default-features = false }                     # for packing BLE wire formats
 
-num-traits = { version = "0.2.19", default-features = false }
+fixed = { version = "1.30.0", features = ["defmt"] }
 
 embassy-executor = "0.9.1"
 esp-bootloader-esp-idf = "0.4.0"
@@ -44,7 +44,6 @@ rand_core = { version = "0.6", default-features = false }
 embassy-sync = { version = "0.7" } # used by macros
 bt-hci = { version = "0.6" }
 static_cell = "2"
-
 
 embassy-embedded-hal = "0.5.0"
 embassy-time = "0.5.0"

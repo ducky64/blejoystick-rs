@@ -9,7 +9,6 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use esp_hal::Async;
-use num_traits::{AsPrimitive, Bounded, PrimInt};
 use static_cell::StaticCell;
 
 use {esp_backtrace as _, esp_println as _};
@@ -22,6 +21,9 @@ mod prelude;
 mod util;
 use crate::bus::{GlobalBus, JoystickState};
 use crate::prelude::*;
+
+// application-specific imports
+use fixed::types::{I16F16, I1F15, U0F16, U16F16};
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
@@ -119,35 +121,49 @@ async fn main(spawner: Spawner) {
     ble_peripheral::run(bus, &stack).await;
 }
 
-fn scale_adc_bipolar<InType, ResultType, IntermediateType>(
-    adc_value: InType,
-    center: InType,
-    fullscale: InType,
-    deadzone: InType,
-) -> ResultType
-where
-    InType: PrimInt + AsPrimitive<IntermediateType>,
-    ResultType: PrimInt + Bounded + AsPrimitive<IntermediateType>,
-    IntermediateType: PrimInt + 'static,
-{
-    let adc_i: IntermediateType = adc_value.as_();
-    let center_i: IntermediateType = center.as_();
-    let deadzone_i: IntermediateType = deadzone.as_();
-    let scale_except_deadzone: IntermediateType = fullscale.as_() - deadzone_i;
+fn adc12_to_u0f16(adc: u16) -> U0F16 {
+    // converts a unsigned raw 12-bit adc reading to U0F16, using the entire range
+    U0F16::from_bits((adc << 4) | (adc >> 8))
+}
 
-    let result = if adc_value > center + deadzone {
-        adc_i - center_i - deadzone_i
-    } else if adc_value < center - deadzone {
-        IntermediateType::zero() - (center_i - deadzone_i - adc_i)
-    } else {
-        IntermediateType::zero()
-    } * ResultType::max_value().as_()
-        / scale_except_deadzone;
-
-    return ResultType::from(
-        result.clamp(ResultType::min_value().as_(), ResultType::max_value().as_()),
+fn linearize_joystick(adc: U0F16) -> U0F16 {
+    // the joystick is a 10k potentiometer, followed by a 10k-10k divider for the ESP32's restricted analog signal range
+    // this produces a nonlinear mapping, which is corrected here
+    // using formula from https://electronics.stackexchange.com/questions/328212/voltage-divider-equation-with-load-on-output
+    // for x = position of joystick, using inverse of their notation
+    // D = x / (1 + 10k / 20k * x * (1-x))
+    // plug'n'chug into a CAS yields
+    // (sqrt(9*d^2 - 4*d + 4) + d - 2) / (2 * d)
+    // which is implemented here in fixed point
+    if adc == 0 {
+        return U0F16::ZERO;
+    }
+    let adc = U16F16::from_num(adc);
+    U0F16::from_num(
+        (U16F16::saturating_sub(9 * adc * adc + U16F16::from_num(4), 4 * adc).sqrt() + adc
+            - U16F16::from_num(2))
+            / (2 * adc),
     )
-    .unwrap_or(ResultType::zero());
+}
+
+fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -> I1F15 {
+    // takes a adc reading [0, 1) and maps it to a bipolar range [-1, 1), with a configurable center, full-scale, and deadzone
+    // full-scale and deadzone are both half-span
+    // convert everything to larger working type
+    let adc = I16F16::from_num(adc);
+    let center = I16F16::from_num(center);
+    let fullscale = I16F16::from_num(fullscale);
+    let deadzone = I16F16::from_num(deadzone);
+
+    let scale_except_deadzone = fullscale - deadzone;
+    let adc_offset = if adc > center + deadzone {
+        adc - center - deadzone
+    } else if adc < center - deadzone {
+        adc - (center - deadzone)
+    } else {
+        I16F16::ZERO
+    };
+    I1F15::saturating_from_num(I16F16::saturating_div(adc_offset, scale_except_deadzone))
 }
 
 // the ADC API seems to be a bit of a dumpster fire
@@ -164,10 +180,10 @@ async fn read_ui(
     button: Input<'static>,
     mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>,
 ) {
-    const CENTER_X: u16 = 2610;
-    const CENTER_Y: u16 = 2650;
-    const FULLSCALE_XY: u16 = 1000; // adc counts for full scale, half-span
-    const DEADZONE_XY: u16 = 32; // in ADC counts, half-span
+    const CENTER_X: U0F16 = U0F16::lit("0.70");
+    const CENTER_Y: U0F16 = U0F16::lit("0.71");
+    const FULLSCALE_XY: U0F16 = U0F16::lit("0.20"); // half-span, including of deadzone
+    const DEADZONE_XY: U0F16 = U0F16::lit("0.02");
 
     let josytick_state_sender = bus.joystick_state.sender();
     loop {
@@ -179,15 +195,33 @@ async fn read_ui(
                 adc.read_oneshot(&mut trig_pin).await,
             )
         };
+
+        let x_linear = scale_bipolar(
+            linearize_joystick(adc12_to_u0f16(x_adc)),
+            CENTER_X,
+            FULLSCALE_XY,
+            DEADZONE_XY,
+        );
+        let y_linear = scale_bipolar(
+            linearize_joystick(adc12_to_u0f16(y_adc)),
+            CENTER_Y,
+            FULLSCALE_XY,
+            DEADZONE_XY,
+        );
+
         let btn_value = button.is_low();
-        debug!(
+
+        trace!(
             "JX {}    JY {}    Btn {}    Tr {}",
-            x_adc, y_adc, btn_value, trig_adc
+            x_linear,
+            y_linear,
+            btn_value,
+            trig_adc
         );
 
         let joystick_state = JoystickState {
-            x: scale_adc_bipolar::<u16, i16, i32>(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY),
-            y: scale_adc_bipolar::<u16, i16, i32>(y_adc, CENTER_Y, FULLSCALE_XY, DEADZONE_XY),
+            x: x_linear.to_bits(),
+            y: y_linear.to_bits(),
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
