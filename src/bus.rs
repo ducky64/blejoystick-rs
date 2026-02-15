@@ -14,6 +14,7 @@ use strum::FromRepr;
 pub struct JoystickState {
     pub x: I1F15,
     pub y: I1F15,
+    pub trig: I1F15,
     pub btn: bool,
 }
 

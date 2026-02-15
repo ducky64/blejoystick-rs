@@ -415,8 +415,9 @@ async fn custom_task<C: Controller, P: PacketPool>(
     let hid_report = server.mouse_service.report;
 
     let mut last_tick = Instant::now();
-    let mut x_accum = RelativeAccummulator::new(I16F16::from_num(1023)); // at max input, produce 7 ticks per second
-    let mut y_accum = RelativeAccummulator::new(I16F16::from_num(63)); // at max input, produce 7 ticks per second
+    let mut trig_accum = RelativeAccummulator::new(I16F16::from_num(127));
+    let mut x_accum = RelativeAccummulator::new(I16F16::from_num(63));
+    let mut y_accum = RelativeAccummulator::new(I16F16::from_num(63));
 
     loop {
         let joystick = joystick_reader.changed().await;
@@ -424,20 +425,31 @@ async fn custom_task<C: Controller, P: PacketPool>(
         let dt = now - last_tick;
         last_tick = now;
 
+        let trig_delta = trig_accum.update(sensitivity_mapping(joystick.trig), dt);
         let x_delta = x_accum.update(sensitivity_mapping(joystick.x), dt);
         let y_delta = y_accum.update(sensitivity_mapping(joystick.y), dt);
-        if x_delta == 0 && y_delta == 0 {
-            // don't send empty packet
-            continue;
-        }
 
         let report = MouseReport {
             buttons: if joystick.btn { 1 } else { 0 },
-            x: x_delta,
+            x: 0,
             y: 0,
-            wheel: -y_delta,
-            pan: 0,
+            wheel: -y_delta - trig_delta,
+            pan: x_delta,
         };
+
+        if report
+            == (MouseReport {
+                buttons: 0,
+                x: 0,
+                y: 0,
+                wheel: 0,
+                pan: 0,
+            })
+        {
+            continue; // don't send reports if nothing changed
+        }
+
+        // info!("report: {}", report);
 
         let mut buf = [0u8; MouseReport::SIZE];
         report.serialize(&mut buf).unwrap();
