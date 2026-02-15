@@ -263,6 +263,8 @@ async fn gatt_events_task(
                 error!("[gatt] pairing error: {:?}", err);
             }
             GattConnectionEvent::Gatt { event } => {
+                let mut config_changed = false;
+
                 let result = match &event {
                     GattEvent::Read(event) => {
                         info!("[gatt] Read Event to Characteristic {}", event.handle());
@@ -283,10 +285,7 @@ async fn gatt_events_task(
                             event.data()
                         );
 
-                        if let Some(stored_bond_info) = stored_bond_info.as_ref() {
-                            let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
-                            new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
-                        }
+                        config_changed = true;
 
                         #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
@@ -305,6 +304,15 @@ async fn gatt_events_task(
                 } else {
                     event.accept()
                 };
+
+                // This needs to be processed after event.accept, otherwise the new values aren't ready
+                if config_changed {
+                    if let Some(stored_bond_info) = stored_bond_info.as_ref() {
+                        let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
+                        new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
+                    }
+                }
+
                 match reply_result {
                     Ok(reply) => reply.send().await,
                     Err(e) => warn!("[gatt] error sending response: {:?}", e),
