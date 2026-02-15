@@ -62,19 +62,15 @@ async fn main(spawner: Spawner) {
     // based on examples from https://github.com/embassy-rs/trouble/tree/main/examples/esp32
     // in particular ble_bas_peripheral.rs
     // esp_println::logger::init_logger_from_env();
-    let mut peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    let mut peripherals =
+        esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    #[cfg(target_arch = "riscv32")]
     let software_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
 
-    esp_rtos::start(
-        timg0.timer0,
-        #[cfg(target_arch = "riscv32")]
-        software_interrupt.software_interrupt0,
-    );
+    esp_rtos::start(timg0.timer0, software_interrupt.software_interrupt0);
 
     info!(
         "descriptor ({}) {:02x}",
@@ -119,6 +115,12 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(read_bat(bus, adc_mutex, vbat_pin));
 
     ble_peripheral::run(bus, &stack).await;
+
+    // Deep sleep code for power benchmarking
+    // let mut rtc = Rtc::new(peripherals.LPWR); // LPWR is the low power peripheral
+    // let timer_wakeup =
+    //     esp_hal::rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_secs(10));
+    // rtc.sleep_deep(&[&timer_wakeup]);
 }
 
 fn adc12_to_u0f16(adc: u16) -> U0F16 {
@@ -208,17 +210,21 @@ async fn read_ui(
             FULLSCALE_XY,
             DEADZONE_XY,
         );
+        let trig_linear = adc12_to_u0f16(trig_adc)
+            .saturating_sub(U0F16::lit("0.55"))
+            .saturating_div(U0F16::lit("0.2"));
 
         let btn_value = button.is_low();
 
-        debug!(
-            "JX {}    JY {}    Btn {}    Tr {}",
-            x_linear, y_linear, btn_value, trig_adc
-        );
+        // info!(
+        //     "JX {}    JY {}    Tr {}    Btn {}",
+        //     x_linear, y_linear, trig_linear, btn_value,
+        // );
 
         let joystick_state = JoystickState {
             x: x_linear,
             y: y_linear,
+            trig: I1F15::from_num(trig_linear),
             btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
