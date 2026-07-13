@@ -6,33 +6,32 @@
     holding buffers for the duration of a data transfer."
 )]
 
-/// [ax1=P0.28, 8, 
-/// ax2=P0.29, 9, 
-/// trig=P0.03, 6, 
-/// i2c=TWIM0, 
-/// i2c.scl=P0.22, 26, 
-/// i2c.sda=P1.00, 27, 
-/// led=P0.30, 10, 
-/// sw=P0.05, 13, 
-/// gate_ctl=P0.07, 15, 
-/// bumper=P0.31, 11, 
-/// stick_pwr_gate=P1.10, 3, 
-/// trig_pwr_gate=P0.04, 12, 
-/// chg=P1.11, 2, 
-/// btns_io0=P0.19, 20, 
-/// swd=SWD, 
-/// swd.swclk=SWCLK, 31, 
-/// swd.swdio=SWDIO, 32, 
-/// 0=USBD, 
-/// 0.dp=D+, 24, 
+/// [ax1=P0.28, 8,
+/// ax2=P0.29, 9,
+/// trig=P0.03, 6,
+/// i2c=TWIM0,
+/// i2c.scl=P0.22, 26,
+/// i2c.sda=P1.00, 27,
+/// led=P0.30, 10,
+/// sw=P0.05, 13,
+/// gate_ctl=P0.07, 15,
+/// bumper=P0.31, 11,
+/// stick_pwr_gate=P1.10, 3,
+/// trig_pwr_gate=P0.04, 12,
+/// chg=P1.11, 2,
+/// btns_io0=P0.19, 20,
+/// swd=SWD,
+/// swd.swclk=SWCLK, 31,
+/// swd.swdio=SWDIO, 32,
+/// 0=USBD,
+/// 0.dp=D+, 24,
 /// 0.dm=D-, 23]
+use defmt_rtt as _;
+use panic_probe as _;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use esp_hal::Async;
 use static_cell::StaticCell;
-
-use {esp_backtrace as _, esp_println as _};
 
 use usbd_hid::descriptor::SerializedDescriptor;
 mod ble_descriptors;
@@ -48,50 +47,21 @@ use fixed::types::{I16F16, I1F15, U0F16, U16F16};
 
 // TrouBLE example imports
 use embassy_executor::Spawner;
-use esp_backtrace as _;
-use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{
-    analog::adc::AdcPin,
-    clock::CpuClock,
-    peripherals::{ADC1, GPIO0, GPIO1, GPIO3, GPIO4},
-};
-use esp_radio::ble::controller::BleConnector;
 use trouble_host::prelude::ExternalController;
 
-// BAS bonding imports
-use esp_hal::rng::{Trng, TrngSource};
-use esp_storage::FlashStorage;
-
 // App-specific imports
+use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_time::{Duration, Timer};
-use esp_hal::{
-    analog::adc::{Adc, AdcConfig, Attenuation},
-    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
-};
 
 extern crate alloc;
-
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
-esp_bootloader_esp_idf::esp_app_desc!();
 
 static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>> =
     StaticCell::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    // based on examples from https://github.com/embassy-rs/trouble/tree/main/examples/esp32
-    // in particular ble_bas_peripheral.rs
-    // esp_println::logger::init_logger_from_env();
-    let mut peripherals =
-        esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
-
-    esp_alloc::heap_allocator!(size: 72 * 1024);
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let software_interrupt =
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-
-    esp_rtos::start(timg0.timer0, software_interrupt.software_interrupt0);
+    let p = embassy_nrf::init(Default::default());
+    info!("Starting!");
 
     info!(
         "descriptor ({}) {:02x}",
@@ -115,11 +85,8 @@ async fn main(spawner: Spawner) {
     };
 
     // initialize IO
-    let led = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
-    let button = Input::new(
-        peripherals.GPIO6,
-        InputConfig::default().with_pull(Pull::Up),
-    );
+    let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
+    let button = Input::new(p.P0_31, Pull::Up);
 
     let mut adc_config = AdcConfig::new();
     let x_pin = adc_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
@@ -131,9 +98,9 @@ async fn main(spawner: Spawner) {
     let adc_mutex = ADC_MUTEX.init(Mutex::new(adc));
 
     // build and run tasks
-    spawner.must_spawn(blinky(led));
-    spawner.must_spawn(read_ui(bus, adc_mutex, x_pin, y_pin, button, trig_pin));
-    spawner.must_spawn(read_bat(bus, adc_mutex, vbat_pin));
+    spawner.spawn(blinky(led).unwrap());
+    spawner.spawn(read_ui(bus, adc_mutex, x_pin, y_pin, button, trig_pin).unwrap());
+    spawner.spawn(read_bat(bus, adc_mutex, vbat_pin).unwrap());
 
     ble_peripheral::run(bus, &stack).await;
 

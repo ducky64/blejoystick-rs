@@ -169,9 +169,7 @@ where
                     info!("Connection dropped");
                 }
                 Err(e) => {
-                    #[cfg(feature = "defmt")]
-                    let e = defmt::Debug2Format(&e);
-                    panic!("[adv] error: {:?}", e);
+                    panic!("[adv] error: {:?}", defmt::Debug2Format(&e));
                 }
             }
         }
@@ -197,9 +195,7 @@ where
 async fn ble_task<C: Controller, P: PacketPool>(mut runner: Runner<'_, C, P>) {
     loop {
         if let Err(e) = runner.run().await {
-            #[cfg(feature = "defmt")]
-            let e = defmt::Debug2Format(&e);
-            panic!("[ble_task] error: {:?}", e);
+            panic!("[ble_task] error: {:?}", defmt::Debug2Format(&e));
         }
     }
 }
@@ -248,7 +244,6 @@ async fn gatt_events_task(
                 info!("[gatt] disconnected: {}", reason);
                 break reason;
             }
-            #[cfg(feature = "security")]
             GattConnectionEvent::PairingComplete {
                 security_level,
                 bond,
@@ -258,7 +253,6 @@ async fn gatt_events_task(
                     new_stored_bond_info = Some(StoredBondInformation::from_bond_info(&bond));
                 }
             }
-            #[cfg(feature = "security")]
             GattConnectionEvent::PairingFailed(err) => {
                 error!("[gatt] pairing error: {:?}", err);
             }
@@ -269,14 +263,11 @@ async fn gatt_events_task(
                     GattEvent::Read(event) => {
                         info!("[gatt] Read Event to Characteristic {}", event.handle());
 
-                        #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
                             None
                         } else {
                             Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
                         }
-                        #[cfg(not(feature = "security"))]
-                        None
                     }
                     GattEvent::Write(event) => {
                         info!(
@@ -287,14 +278,11 @@ async fn gatt_events_task(
 
                         config_changed = true;
 
-                        #[cfg(feature = "security")]
                         if conn.raw().security_level()?.encrypted() {
                             None
                         } else {
                             Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
                         }
-                        #[cfg(not(feature = "security"))]
-                        None
                     }
                     _ => None,
                 };
