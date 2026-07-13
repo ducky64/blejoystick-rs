@@ -6,6 +6,27 @@
     holding buffers for the duration of a data transfer."
 )]
 
+/// [ax1=P0.28, 8, 
+/// ax2=P0.29, 9, 
+/// trig=P0.03, 6, 
+/// i2c=TWIM0, 
+/// i2c.scl=P0.22, 26, 
+/// i2c.sda=P1.00, 27, 
+/// led=P0.30, 10, 
+/// sw=P0.05, 13, 
+/// gate_ctl=P0.07, 15, 
+/// bumper=P0.31, 11, 
+/// stick_pwr_gate=P1.10, 3, 
+/// trig_pwr_gate=P0.04, 12, 
+/// chg=P1.11, 2, 
+/// btns_io0=P0.19, 20, 
+/// swd=SWD, 
+/// swd.swclk=SWCLK, 31, 
+/// swd.swdio=SWDIO, 32, 
+/// 0=USBD, 
+/// 0.dp=D+, 24, 
+/// 0.dm=D-, 23]
+
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use esp_hal::Async;

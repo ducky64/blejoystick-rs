@@ -11,9 +11,25 @@ path = "./src/main.rs"
 # based on https://github.com/embassy-rs/trouble/blob/main/examples/esp32/Cargo.toml
 
 [dependencies]
-defmt = { version = "1.0.1", optional = true }
-log = { version = "0.4", optional = true }
-esp-backtrace = { version = "0.18.0", features = ["panic-handler"] }
+cortex-m = { version = "0.7.6", features = [
+    "inline-asm",
+    "critical-section-single-core",
+] }
+cortex-m-rt = "0.7.0"
+
+embassy-nrf = { version = "0.11.0", features = [
+    "defmt",
+    "nrf52840",
+    "time-driver-rtc1",
+    "gpiote",
+    "unstable-pac",
+    "time",
+] }
+
+defmt = { version = "1.0.1" }
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+# log = { version = "0.4" }
 
 heapless = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"], default-features = false }
@@ -22,18 +38,18 @@ ssmarshal = { version = "1.0", default-features = false }                     # 
 
 fixed = { version = "1.30.0", features = ["defmt"] }
 
-embassy-executor = "0.9.1"
-esp-bootloader-esp-idf = "0.4.0"
-esp-hal = { version = "1.0.0", features = ["unstable"] }
-esp-alloc = { version = "0.9.0" }
-esp-println = { version = "0.16.0" }
-esp-radio = { version = "0.17.0", features = ["ble", "unstable"] }
-esp-rtos = { version = "0.2.0", features = [
-    "embassy",
-    "esp-alloc",
-    "esp-radio",
+embassy-executor = { version = "0.10", features = [
+    "platform-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+    "defmt",
 ] }
-trouble-host = { version = "0.5.1", features = ["default-packet-pool-mtu-255"] }
+
+trouble-host = { version = "0.5.1", features = [
+    "default-packet-pool-mtu-255",
+    "security",
+    "defmt",
+] }
 
 # for BLE 'security' feature
 sequential-storage = { version = "7.1.0", features = ["postcard"] }
@@ -41,13 +57,13 @@ embassy-futures = "0.1.1"
 rand_core = { version = "0.6", default-features = false }
 
 # for 'ble_bas_peripheral_bonding'
-embassy-sync = { version = "0.7" } # used by macros
-bt-hci = { version = "0.6" }
+embassy-sync = { version = "0.7" }                 # used by macros
+bt-hci = { version = "0.6", features = ["defmt"] }
+portable-atomic = "1"
 static_cell = "2"
 
 embassy-embedded-hal = "0.5.0"
-embassy-time = "0.5.0"
-esp-storage = { version = "0.8.1" }
+embassy-time = { version = "0.5.0", features = ["defmt"] }
 
 # peripherals
 embedded-hal-nb = "1.0.0"
@@ -55,41 +71,6 @@ usbd-hid = "0.9"          # for HID generation
 
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 # embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
-
-[features]
-default = ["esp32c3", "security", "defmt"]
-
-esp32c3 = [
-    "esp-hal/esp32c3",
-    "esp-backtrace/esp32c3",
-    "esp-println/esp32c3",
-    "esp-radio/esp32c3",
-    "esp-rtos/esp32c3",
-    "esp-storage/esp32c3",
-    "esp-bootloader-esp-idf/esp32c3",
-]
-
-defmt = [
-    "dep:defmt",
-    "esp-backtrace/defmt",
-    "esp-alloc/defmt",
-    "esp-hal/defmt",
-    "esp-println/defmt-espflash",
-    "embassy-executor/defmt",
-    "embassy-time/defmt",
-    "trouble-host/defmt",
-    "bt-hci/defmt",
-]
-log = [
-    "dep:log",
-    "esp-backtrace/println",
-    "esp-println/log-04",
-    "esp-radio/log-04",
-    "esp-rtos/log-04",
-]
-
-security = ["trouble-host/security"]
-std = []
 
 [profile.dev]
 # Rust debug is too slow.
@@ -104,3 +85,6 @@ incremental = false
 lto = 'fat'
 opt-level = 's'
 overflow-checks = false
+
+[patch.crates-io]
+usbd-hid = { path = "../usbd-hid" }
