@@ -1,7 +1,6 @@
 use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
-use esp_storage::FlashStorage;
 use fixed::types::I1F15;
 use sequential_storage::{
     cache::NoCache,

@@ -27,6 +27,7 @@
 /// 0.dp=D+, 24,
 /// 0.dm=D-, 23]
 use defmt_rtt as _;
+use embassy_nrf::pac::ppi::Ch;
 use panic_probe as _;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -51,12 +52,12 @@ use trouble_host::prelude::ExternalController;
 
 // App-specific imports
 use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
+use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_time::{Duration, Timer};
 
 extern crate alloc;
 
-static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>> =
-    StaticCell::new();
+static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Saadc<'static, 3>>> = StaticCell::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -88,19 +89,15 @@ async fn main(spawner: Spawner) {
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     let button = Input::new(p.P0_31, Pull::Up);
 
-    let mut adc_config = AdcConfig::new();
-    let x_pin = adc_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
-    let y_pin = adc_config.enable_pin(peripherals.GPIO3, Attenuation::_11dB);
-    let trig_pin = adc_config.enable_pin(peripherals.GPIO1, Attenuation::_11dB);
-    let vbat_pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
+    let x_pin = ChannelConfig::single_ended(p.P0_28.reborrow());
+    let y_pin = ChannelConfig::single_ended(p.P0_29.reborrow());
+    let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
 
-    let adc = Adc::new(peripherals.ADC1, adc_config).into_async();
-    let adc_mutex = ADC_MUTEX.init(Mutex::new(adc));
+    let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
 
     // build and run tasks
     spawner.spawn(blinky(led).unwrap());
-    spawner.spawn(read_ui(bus, adc_mutex, x_pin, y_pin, button, trig_pin).unwrap());
-    spawner.spawn(read_bat(bus, adc_mutex, vbat_pin).unwrap());
+    spawner.spawn(read_ui(bus, adc).unwrap());
 
     ble_peripheral::run(bus, &stack).await;
 
@@ -162,14 +159,7 @@ fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -
 // https://github.com/rust-embedded/embedded-hal/pull/376
 // so for now, the GPIO # is hardcoded instead of generic, yuck!
 #[embassy_executor::task]
-async fn read_ui(
-    bus: &'static GlobalBus,
-    adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
-    mut x_pin: AdcPin<GPIO4<'static>, ADC1<'static>>,
-    mut y_pin: AdcPin<GPIO3<'static>, ADC1<'static>>,
-    button: Input<'static>,
-    mut trig_pin: AdcPin<GPIO1<'static>, ADC1<'static>>,
-) {
+async fn read_ui(bus: &'static GlobalBus, adc: Saadc<'static, 3>) {
     const CENTER_X: U0F16 = U0F16::lit("0.70");
     const CENTER_Y: U0F16 = U0F16::lit("0.71");
     const FULLSCALE_XY: U0F16 = U0F16::lit("0.20"); // half-span, including of deadzone
@@ -177,14 +167,11 @@ async fn read_ui(
 
     let josytick_state_sender = bus.joystick_state.sender();
     loop {
-        let (x_adc, y_adc, trig_adc) = {
-            let mut adc = adc_mutex.lock().await;
-            (
-                adc.read_oneshot(&mut x_pin).await,
-                adc.read_oneshot(&mut y_pin).await,
-                adc.read_oneshot(&mut trig_pin).await,
-            )
-        };
+        let mut buf = [0; 3];
+        adc.sample(&mut buf).await;
+        let mut x_adc = buf[0];
+        let mut y_adc = buf[1];
+        let mut trig_adc = buf[2];
 
         let x_linear = scale_bipolar(
             linearize_joystick(adc12_to_u0f16(x_adc)),
@@ -220,23 +207,23 @@ async fn read_ui(
     }
 }
 
-#[embassy_executor::task]
-async fn read_bat(
-    bus: &'static GlobalBus,
-    adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
-    mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>,
-) {
-    let vbus_sender = bus.vbat.sender();
-    loop {
-        let vbat_value = {
-            let mut adc = adc_mutex.lock().await;
-            adc.read_oneshot(&mut vbat_pin).await
-        };
-        debug!("read vbat {}", vbat_value);
-        vbus_sender.send(vbat_value); // TODO SCALING
-        Timer::after(Duration::from_millis(1000)).await;
-    }
-}
+// #[embassy_executor::task]
+// async fn read_bat(
+//     bus: &'static GlobalBus,
+//     adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
+//     mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>,
+// ) {
+//     let vbus_sender = bus.vbat.sender();
+//     loop {
+//         let vbat_value = {
+//             let mut adc = adc_mutex.lock().await;
+//             adc.read_oneshot(&mut vbat_pin).await
+//         };
+//         debug!("read vbat {}", vbat_value);
+//         vbus_sender.send(vbat_value); // TODO SCALING
+//         Timer::after(Duration::from_millis(1000)).await;
+//     }
+// }
 
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>) {
