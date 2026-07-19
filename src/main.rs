@@ -59,7 +59,54 @@ extern crate alloc;
 
 static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Saadc<'static, 3>>> = StaticCell::new();
 
-#[esp_rtos::main]
+use embassy_nrf::mode::Async;
+use embassy_nrf::peripherals::RNG;
+use embassy_nrf::{bind_interrupts, qspi, rng, saadc};
+use nrf_sdc::mpsl::Flash;
+use nrf_sdc::mpsl::MultiprotocolServiceLayer;
+use nrf_sdc::{self as sdc, mpsl};
+use rand_chacha::ChaCha12Rng;
+
+bind_interrupts!(struct Irqs {
+    RNG => rng::InterruptHandler<RNG>;
+    EGU0_SWI0 => nrf_sdc::mpsl::LowPrioInterruptHandler;
+    CLOCK_POWER => nrf_sdc::mpsl::ClockInterruptHandler;
+    RADIO => nrf_sdc::mpsl::HighPrioInterruptHandler;
+    TIMER0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
+    RTC0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
+    QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
+    SAADC => saadc::InterruptHandler;
+});
+
+#[embassy_executor::task]
+async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+    mpsl.run().await
+}
+
+/// How many outgoing L2CAP buffers per link
+const L2CAP_TXQ: u8 = 3;
+
+/// How many incoming L2CAP buffers per link
+const L2CAP_RXQ: u8 = 3;
+
+/// Size of L2CAP packets
+const L2CAP_MTU: usize = 72;
+
+fn build_sdc<'d, const N: usize>(
+    p: nrf_sdc::Peripherals<'d>,
+    rng: &'d mut rng::Rng<RNG, Async>,
+    mpsl: &'d MultiprotocolServiceLayer,
+    mem: &'d mut sdc::Mem<N>,
+) -> Result<nrf_sdc::SoftdeviceController<'d>, nrf_sdc::Error> {
+    sdc::Builder::new()?
+        .support_adv()?
+        .support_peripheral()?
+        .peripheral_count(1)?
+        .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
+        .build(p, rng, mpsl, mem)
+}
+
+#[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
     info!("Starting!");
@@ -74,16 +121,48 @@ async fn main(spawner: Spawner) {
     let flash = FlashStorage::new(peripherals.FLASH);
     let bus = bus::init(flash);
 
-    // initialize BLE
-    let radio = esp_radio::init().unwrap();
-    let bluetooth = peripherals.BT;
-    let connector = BleConnector::new(&radio, bluetooth, Default::default()).unwrap();
-    let controller: ExternalController<_, 20> = ExternalController::new(connector);
-    let stack = {
-        let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
-        let mut trng = Trng::try_new().unwrap();
-        ble_peripheral::build_stack(controller, &mut trng)
+    // initialize BLE - black magic from trouble example
+    let mpsl_p =
+        mpsl::Peripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31);
+    let lfclk_cfg = mpsl::raw::mpsl_clock_lfclk_cfg_t {
+        source: mpsl::raw::MPSL_CLOCK_LF_SRC_RC as u8,
+        rc_ctiv: mpsl::raw::MPSL_RECOMMENDED_RC_CTIV as u8,
+        rc_temp_ctiv: mpsl::raw::MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
+        accuracy_ppm: mpsl::raw::MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
+        skip_wait_lfclk_started: mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
     };
+    static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
+    let mpsl = MPSL.init(mpsl::MultiprotocolServiceLayer::new(mpsl_p, Irqs, lfclk_cfg).unwrap());
+    spawner.spawn(mpsl_task(&*mpsl).unwrap());
+
+    let sdc_p = sdc::Peripherals::new(
+        p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
+        p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
+    );
+
+    let mut rng = rng::Rng::new(p.RNG, Irqs);
+    let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
+
+    let mut sdc_mem = sdc::Mem::<3312>::new();
+    let sdc = build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem).unwrap();
+
+    // Config for the MX25R64 present in the nRF52840 DK
+    let mut config = qspi::Config::default();
+    config.read_opcode = qspi::ReadOpcode::READ4IO;
+    config.write_opcode = qspi::WriteOpcode::PP4IO;
+    config.write_page_size = qspi::WritePageSize::_256BYTES;
+    config.frequency = qspi::Frequency::M32;
+    config.capacity = 8 * 1024 * 1024;
+
+    // let radio = esp_radio::init().unwrap();
+    // let bluetooth = peripherals.BT;
+    // let connector = BleConnector::new(&radio, bluetooth, Default::default()).unwrap();
+    // let controller: ExternalController<_, 20> = ExternalController::new(connector);
+    // let stack = {
+    //     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
+    //     let mut trng = Trng::try_new().unwrap();
+    //     ble_peripheral::build_stack(controller, &mut trng)
+    // };
 
     // initialize IO
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
@@ -99,7 +178,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(blinky(led).unwrap());
     spawner.spawn(read_ui(bus, adc).unwrap());
 
-    ble_peripheral::run(bus, &stack).await;
+    // ble_peripheral::run(bus, &stack).await;
 
     // Deep sleep code for power benchmarking
     // let mut rtc = Rtc::new(peripherals.LPWR); // LPWR is the low power peripheral
@@ -108,29 +187,9 @@ async fn main(spawner: Spawner) {
     // rtc.sleep_deep(&[&timer_wakeup]);
 }
 
-fn adc12_to_u0f16(adc: u16) -> U0F16 {
+fn adc12_to_u0f16(adc: i16) -> U0F16 {
     // converts a unsigned raw 12-bit adc reading to U0F16, using the entire range
-    U0F16::from_bits((adc << 4) | (adc >> 8))
-}
-
-fn linearize_joystick(adc: U0F16) -> U0F16 {
-    // the joystick is a 10k potentiometer, followed by a 10k-10k divider for the ESP32's restricted analog signal range
-    // this produces a nonlinear mapping, which is corrected here
-    // using formula from https://electronics.stackexchange.com/questions/328212/voltage-divider-equation-with-load-on-output
-    // for x = position of joystick, using inverse of their notation
-    // D = x / (1 + 10k / 20k * x * (1-x))
-    // plug'n'chug into a CAS yields
-    // (sqrt(9*d^2 - 4*d + 4) + d - 2) / (2 * d)
-    // which is implemented here in fixed point
-    if adc == 0 {
-        return U0F16::ZERO;
-    }
-    let adc = U16F16::from_num(adc);
-    U0F16::from_num(
-        (U16F16::saturating_sub(9 * adc * adc + U16F16::from_num(4), 4 * adc).sqrt() + adc
-            - U16F16::from_num(2))
-            / (2 * adc),
-    )
+    U0F16::from_bits(((adc as u16) << 4) | ((adc as u16) >> 8))
 }
 
 fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -> I1F15 {
@@ -157,9 +216,8 @@ fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -
 // https://github.com/esp-rs/esp-hal/issues/449
 // such that it was removed int he embedded hal 1.0 API
 // https://github.com/rust-embedded/embedded-hal/pull/376
-// so for now, the GPIO # is hardcoded instead of generic, yuck!
 #[embassy_executor::task]
-async fn read_ui(bus: &'static GlobalBus, adc: Saadc<'static, 3>) {
+async fn read_ui(bus: &'static GlobalBus, mut adc: Saadc<'static, 3>) {
     const CENTER_X: U0F16 = U0F16::lit("0.70");
     const CENTER_Y: U0F16 = U0F16::lit("0.71");
     const FULLSCALE_XY: U0F16 = U0F16::lit("0.20"); // half-span, including of deadzone
@@ -169,27 +227,17 @@ async fn read_ui(bus: &'static GlobalBus, adc: Saadc<'static, 3>) {
     loop {
         let mut buf = [0; 3];
         adc.sample(&mut buf).await;
-        let mut x_adc = buf[0];
-        let mut y_adc = buf[1];
-        let mut trig_adc = buf[2];
+        let x_adc = buf[0];
+        let y_adc = buf[1];
+        let trig_adc = buf[2];
 
-        let x_linear = scale_bipolar(
-            linearize_joystick(adc12_to_u0f16(x_adc)),
-            CENTER_X,
-            FULLSCALE_XY,
-            DEADZONE_XY,
-        );
-        let y_linear = scale_bipolar(
-            linearize_joystick(adc12_to_u0f16(y_adc)),
-            CENTER_Y,
-            FULLSCALE_XY,
-            DEADZONE_XY,
-        );
+        let x_linear = scale_bipolar(adc12_to_u0f16(x_adc), CENTER_X, FULLSCALE_XY, DEADZONE_XY);
+        let y_linear = scale_bipolar(adc12_to_u0f16(y_adc), CENTER_Y, FULLSCALE_XY, DEADZONE_XY);
         let trig_linear = adc12_to_u0f16(trig_adc)
             .saturating_sub(U0F16::lit("0.55"))
             .saturating_div(U0F16::lit("0.2"));
 
-        let btn_value = button.is_low();
+        // let btn_value = button.is_low();
 
         // info!(
         //     "JX {}    JY {}    Tr {}    Btn {}",
@@ -200,7 +248,7 @@ async fn read_ui(bus: &'static GlobalBus, adc: Saadc<'static, 3>) {
             x: x_linear,
             y: y_linear,
             trig: I1F15::from_num(trig_linear),
-            btn: btn_value,
+            btn: false, //btn_value,
         };
         josytick_state_sender.send(joystick_state);
         Timer::after(Duration::from_millis(20)).await;

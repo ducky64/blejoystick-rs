@@ -8,8 +8,6 @@ version = "0.1.0"
 name = "blejoystick-rs"
 path = "./src/main.rs"
 
-# based on https://github.com/embassy-rs/trouble/blob/main/examples/esp32/Cargo.toml
-
 [dependencies]
 cortex-m = { version = "0.7.6", features = [
     "inline-asm",
@@ -17,19 +15,34 @@ cortex-m = { version = "0.7.6", features = [
 ] }
 cortex-m-rt = "0.7.0"
 
-embassy-nrf = { version = "0.11.0", features = [
+embassy-nrf = { version = "0.7", features = [
     "defmt",
-    "nrf52840",
     "time-driver-rtc1",
     "gpiote",
     "unstable-pac",
-    "time",
+    "rt",
+    "nrf52840",
+] }
+
+# this is pinned to an older version
+# https://github.com/embassy-rs/trouble/blob/39c5c993042f37f7361091492502d3a65926f8fe/examples/nrf-sdc/Cargo.toml
+# this is the last version using a crates.io version of nrf-sdc, nrf-mpsl
+# newer version of embassy build those from versioned git instead of crates.io
+# and this PR breaks Windows builds because of use of git symlinks
+# # https://github.com/alexmoon/nrf-sdc/issues/84
+nrf-sdc = { version = "0.3", default-features = false, features = [
+    "defmt",
+    "peripheral",
+    "nrf52840",
+] }
+nrf-mpsl = { version = "0.3", default-features = false, features = [
+    "defmt",
+    "critical-section-impl",
 ] }
 
 defmt = { version = "1.0.1" }
 defmt-rtt = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-# log = { version = "0.4" }
 
 heapless = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"], default-features = false }
@@ -45,25 +58,22 @@ embassy-executor = { version = "0.10", features = [
     "defmt",
 ] }
 
-trouble-host = { version = "0.5.1", features = [
-    "default-packet-pool-mtu-255",
-    "security",
-    "defmt",
-] }
+trouble-host = { version = "0.7", features = ["security", "defmt"] }
 
 # for BLE 'security' feature
-sequential-storage = { version = "7.1.0", features = ["postcard"] }
+sequential-storage = { version = "8.0", features = ["postcard"] }
 embassy-futures = "0.1.1"
 rand_core = { version = "0.6", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
 
 # for 'ble_bas_peripheral_bonding'
-embassy-sync = { version = "0.7" }                 # used by macros
-bt-hci = { version = "0.6", features = ["defmt"] }
+embassy-sync = { version = "0.8" }
+bt-hci = { version = "0.4", features = ["defmt"] }
 portable-atomic = "1"
 static_cell = "2"
 
-embassy-embedded-hal = "0.5.0"
-embassy-time = { version = "0.5.0", features = ["defmt"] }
+embassy-embedded-hal = "0.6.0"
+embassy-time = { version = "0.5", features = ["defmt"] }
 
 # peripherals
 embedded-hal-nb = "1.0.0"
