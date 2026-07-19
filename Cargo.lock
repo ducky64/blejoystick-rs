@@ -127,7 +127,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-nrf",
- "embassy-sync 0.8.0",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-hal-nb",
  "fixed",
@@ -173,15 +173,15 @@ dependencies = [
 
 [[package]]
 name = "bt-hci"
-version = "0.9.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3c66fd0a41a3b3a5906847b1bf5516048ce083e24fa9341a0fa31d3b4cd73d"
+checksum = "bb938a3b4c5cc6c2409275bad789c0346a0495fa071a0acc5d72b9bd3175a2f7"
 dependencies = [
  "btuuid",
  "defmt 1.0.1",
- "embassy-sync 0.8.0",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
+ "embassy-sync 0.7.2",
+ "embedded-io 0.6.1",
+ "embedded-io-async 0.6.1",
  "futures-intrusive",
  "heapless 0.9.2",
 ]
@@ -216,9 +216,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
-version = "1.2.67"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
+checksum = "c89588d05638b5b4594a3348a2d6c20277e43a7f5c5202b05cc56888475a47b8"
 dependencies = [
  "find-msvc-tools",
  "shlex 2.0.1",
@@ -313,7 +313,6 @@ checksum = "8ec610d8f49840a5b376c69663b6369e71f4b34484b9b2eb29fb918d92516cb9"
 dependencies = [
  "bare-metal",
  "bitfield 0.13.2",
- "critical-section",
  "embedded-hal 0.2.7",
  "volatile-register",
 ]
@@ -793,9 +792,6 @@ name = "embedded-io"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
-dependencies = [
- "defmt 1.0.1",
-]
 
 [[package]]
 name = "embedded-io-async"
@@ -813,7 +809,6 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
- "defmt 1.0.1",
  "embedded-io 0.7.1",
 ]
 
@@ -1851,18 +1846,18 @@ dependencies = [
 
 [[package]]
 name = "trouble-host"
-version = "0.7.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb9fe2be24000037431b036ba244cdb1d26f40e1719548553fb43c3fc62d496b"
+checksum = "2881b4859001fe1f48445145cda5149deac9110b1d707ec0a251b7ff6d8bdfa4"
 dependencies = [
  "aes",
- "bt-hci 0.9.0",
+ "bt-hci 0.6.0",
  "cmac",
  "defmt 1.0.1",
  "embassy-futures",
- "embassy-sync 0.8.0",
+ "embassy-sync 0.7.2",
  "embassy-time",
- "embedded-io 0.7.1",
+ "embedded-io 0.6.1",
  "futures",
  "heapless 0.9.2",
  "p256",
@@ -1876,9 +1871,9 @@ dependencies = [
 
 [[package]]
 name = "trouble-host-macros"
-version = "0.5.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2562dc74f79ad12f7bf088da55c936d5eb1d022f2caac9849175326307a5eec1"
+checksum = "bcb85bec3a8393c22ca1a7c25c82c2d33689ab412f3487c492fd01a033ede7c2"
 dependencies = [
  "convert_case",
  "darling",

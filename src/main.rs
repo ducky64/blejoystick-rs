@@ -1,10 +1,5 @@
 #![no_std]
 #![no_main]
-#![deny(
-    clippy::mem_forget,
-    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-    holding buffers for the duration of a data transfer."
-)]
 
 /// [ax1=P0.28, 8,
 /// ax2=P0.29, 9,
@@ -27,7 +22,6 @@
 /// 0.dp=D+, 24,
 /// 0.dm=D-, 23]
 use defmt_rtt as _;
-use embassy_nrf::pac::ppi::Ch;
 use panic_probe as _;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -43,30 +37,23 @@ mod util;
 use crate::bus::{GlobalBus, JoystickState};
 use crate::prelude::*;
 
-// application-specific imports
-use fixed::types::{I16F16, I1F15, U0F16, U16F16};
+use fixed::types::{I16F16, I1F15, U0F16};
 
-// TrouBLE example imports
 use embassy_executor::Spawner;
-use trouble_host::prelude::ExternalController;
 
 // App-specific imports
-use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
+use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_time::{Duration, Timer};
-
-extern crate alloc;
 
 static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Saadc<'static, 3>>> = StaticCell::new();
 
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;
-use embassy_nrf::{bind_interrupts, qspi, rng, saadc};
-use nrf_sdc::mpsl::Flash;
+use embassy_nrf::{bind_interrupts, rng, saadc};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
-use rand_chacha::ChaCha12Rng;
 
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
@@ -75,7 +62,6 @@ bind_interrupts!(struct Irqs {
     RADIO => nrf_sdc::mpsl::HighPrioInterruptHandler;
     TIMER0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
     RTC0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
-    QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
     SAADC => saadc::InterruptHandler;
 });
 
@@ -109,7 +95,7 @@ fn build_sdc<'d, const N: usize>(
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = embassy_nrf::init(Default::default());
+    let mut p = embassy_nrf::init(Default::default());
     info!("Starting!");
 
     info!(
@@ -119,7 +105,7 @@ async fn main(spawner: Spawner) {
     );
 
     // initialize global state and shared peripherals
-    let mut flash = Nvmc::new(p.NVMC);
+    let flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
 
     // initialize BLE - black magic from trouble example
@@ -142,18 +128,9 @@ async fn main(spawner: Spawner) {
     );
 
     let mut rng = rng::Rng::new(p.RNG, Irqs);
-    let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
 
     let mut sdc_mem = sdc::Mem::<3312>::new();
     let sdc = build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem).unwrap();
-
-    // Config for the MX25R64 present in the nRF52840 DK
-    let mut config = qspi::Config::default();
-    config.read_opcode = qspi::ReadOpcode::READ4IO;
-    config.write_opcode = qspi::WriteOpcode::PP4IO;
-    config.write_page_size = qspi::WritePageSize::_256BYTES;
-    config.frequency = qspi::Frequency::M32;
-    config.capacity = 8 * 1024 * 1024;
 
     // let radio = esp_radio::init().unwrap();
     // let bluetooth = peripherals.BT;
