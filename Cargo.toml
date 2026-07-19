@@ -19,6 +19,7 @@ embassy-nrf = { version = "0.7", features = [
     "unstable-pac",
     "rt",
     "nrf52840",
+    "nfc-pins-as-gpio",
 ] }
 
 # this is pinned to an older version

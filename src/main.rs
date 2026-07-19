@@ -108,6 +108,25 @@ async fn main(spawner: Spawner) {
     let flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
 
+    // initialise peripherals and tasks
+    // pull high to enable charging, low to disable
+    let mut chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
+
+    let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
+    spawner.spawn(blinky(led).unwrap());
+
+    let mut stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
+    let mut trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
+
+    let bumper = Input::new(p.P0_31, Pull::Up);
+    let stick_sw = Input::new(p.P0_05, Pull::Up);
+
+    let x_pin = ChannelConfig::single_ended(p.P0_28.reborrow());
+    let y_pin = ChannelConfig::single_ended(p.P0_29.reborrow());
+    let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
+    let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
+    spawner.spawn(read_ui(bus, stick_gate, trig_gate, adc, stick_sw).unwrap());
+
     // initialize BLE - black magic from trouble example
     let mpsl_p =
         mpsl::Peripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31);
@@ -142,27 +161,7 @@ async fn main(spawner: Spawner) {
     //     ble_peripheral::build_stack(controller, &mut trng)
     // };
 
-    // initialize IO
-    let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
-    let button = Input::new(p.P0_31, Pull::Up);
-
-    let x_pin = ChannelConfig::single_ended(p.P0_28.reborrow());
-    let y_pin = ChannelConfig::single_ended(p.P0_29.reborrow());
-    let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
-
-    let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
-
-    // build and run tasks
-    spawner.spawn(blinky(led).unwrap());
-    spawner.spawn(read_ui(bus, adc).unwrap());
-
     // ble_peripheral::run(bus, &stack).await;
-
-    // Deep sleep code for power benchmarking
-    // let mut rtc = Rtc::new(peripherals.LPWR); // LPWR is the low power peripheral
-    // let timer_wakeup =
-    //     esp_hal::rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_secs(10));
-    // rtc.sleep_deep(&[&timer_wakeup]);
 }
 
 fn adc12_to_u0f16(adc: i16) -> U0F16 {
@@ -195,13 +194,23 @@ fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -
 // such that it was removed int he embedded hal 1.0 API
 // https://github.com/rust-embedded/embedded-hal/pull/376
 #[embassy_executor::task]
-async fn read_ui(bus: &'static GlobalBus, mut adc: Saadc<'static, 3>) {
+async fn read_ui(
+    bus: &'static GlobalBus,
+    mut stick_gate: Output<'static>,
+    mut trig_gate: Output<'static>,
+    mut adc: Saadc<'static, 3>,
+    stick_sw: Input<'static>,
+) {
     const CENTER_X: U0F16 = U0F16::lit("0.70");
     const CENTER_Y: U0F16 = U0F16::lit("0.71");
     const FULLSCALE_XY: U0F16 = U0F16::lit("0.20"); // half-span, including of deadzone
     const DEADZONE_XY: U0F16 = U0F16::lit("0.02");
 
     let josytick_state_sender = bus.joystick_state.sender();
+
+    stick_gate.set_low();
+    trig_gate.set_high();
+
     loop {
         let mut buf = [0; 3];
         adc.sample(&mut buf).await;
@@ -215,12 +224,12 @@ async fn read_ui(bus: &'static GlobalBus, mut adc: Saadc<'static, 3>) {
             .saturating_sub(U0F16::lit("0.55"))
             .saturating_div(U0F16::lit("0.2"));
 
-        // let btn_value = button.is_low();
+        let btn_value = stick_sw.is_low();
 
-        // info!(
-        //     "JX {}    JY {}    Tr {}    Btn {}",
-        //     x_linear, y_linear, trig_linear, btn_value,
-        // );
+        info!(
+            "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
+            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
+        );
 
         let joystick_state = JoystickState {
             x: x_linear,
@@ -254,9 +263,9 @@ async fn read_ui(bus: &'static GlobalBus, mut adc: Saadc<'static, 3>) {
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>) {
     loop {
-        led.set_high(); // LED off
-        Timer::after(Duration::from_millis(250)).await;
+        led.set_high();
+        Timer::after(Duration::from_millis(25)).await;
         led.set_low();
-        Timer::after(Duration::from_millis(250)).await;
+        Timer::after(Duration::from_millis(225)).await;
     }
 }
