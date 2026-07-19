@@ -1,9 +1,10 @@
 use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_nrf::nvmc::Nvmc;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
 use fixed::types::I1F15;
 use sequential_storage::{
-    cache::NoCache,
+    cache::{Cache, Uncached},
     map::{Key, MapConfig, MapStorage, SerializationError},
 };
 use static_cell::StaticCell;
@@ -56,7 +57,11 @@ impl Key for StorageKey {
 pub struct GlobalBus {
     pub storage: Mutex<
         CriticalSectionRawMutex,
-        MapStorage<StorageKey, BlockingAsync<FlashStorage<'static>>, NoCache>,
+        MapStorage<
+            StorageKey,
+            BlockingAsync<Nvmc<'static>>,
+            Cache<Uncached, Uncached, Uncached, StorageKey>,
+        >,
     >,
 
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
@@ -65,11 +70,11 @@ pub struct GlobalBus {
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
 
-pub fn init(flash: FlashStorage<'static>) -> &'static GlobalBus {
-    let storage = MapStorage::<StorageKey, BlockingAsync<FlashStorage<'static>>, NoCache>::new(
+pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
+    let storage = MapStorage::<StorageKey, _, _>::new(
         BlockingAsync::new(flash),
-        const { MapConfig::new(0x10_0000..0x12_0000) },
-        NoCache::new(),
+        const { MapConfig::new(0x000F_E000..0x0010_0000) },
+        Cache::new_uncached(),
     );
 
     BUS.init(GlobalBus {

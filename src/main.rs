@@ -51,6 +51,7 @@ use embassy_executor::Spawner;
 use trouble_host::prelude::ExternalController;
 
 // App-specific imports
+use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_time::{Duration, Timer};
@@ -118,7 +119,7 @@ async fn main(spawner: Spawner) {
     );
 
     // initialize global state and shared peripherals
-    let flash = FlashStorage::new(peripherals.FLASH);
+    let mut flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
 
     // initialize BLE - black magic from trouble example
