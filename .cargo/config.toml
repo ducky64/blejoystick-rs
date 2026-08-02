@@ -6,3 +6,11 @@ target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
+# required for nimble builds on Windows to locate the local arm toolchain install
+BINDGEN_EXTRA_CLANG_ARGS = "-I\"C:/Program Files/Arm/GNU Toolchain mingw-w64-x86_64-arm-none-eabi/arm-none-eabi/include\""
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+  "-C",
+  "link-arg=-lnosys", # stubs out system calls referenced in apache-nimble
+]

@@ -100,10 +100,9 @@ static RESOURCES: StaticCell<
 > = StaticCell::new();
 
 /// Build the BLE stack, temporarily acquiring resources needed for construction
-pub fn build_stack<'a, C, TRNG>(controller: C, trng: &mut TRNG) -> Stack<'a, C, DefaultPacketPool>
+pub fn build_stack<'a, C>(controller: C) -> Stack<'a, C, DefaultPacketPool>
 where
     C: Controller + 'a,
-    TRNG: RngCore + CryptoRng,
 {
     // Using a fixed "random" address can be useful for testing. In real scenarios, one would
     // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
@@ -112,9 +111,7 @@ where
 
     let resources = RESOURCES.init(HostResources::new());
 
-    return trouble_host::new(controller, resources)
-        .set_random_address(address)
-        .set_random_generator_seed(trng);
+    return trouble_host::new(controller, resources).set_random_address(address);
 }
 
 /// Run the BLE stack.

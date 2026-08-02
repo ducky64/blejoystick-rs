@@ -10,3 +10,11 @@ MEMORY
      RAM : ORIGIN = 0x20020000, LENGTH = 128K
   */
 }
+
+PROVIDE(_sbss = __sbss);
+PROVIDE(_ebss = __ebss);
+PROVIDE(_sdata = __sdata);
+PROVIDE(_edata = __edata);
+PROVIDE(_sidata = __sidata);
+
+PROVIDE(end = _ebss);
