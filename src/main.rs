@@ -58,9 +58,36 @@ use rand_chacha::ChaCha12Rng;
 use rand_core::SeedableRng;
 
 bind_interrupts!(struct Irqs {
-    // RNG => rng::InterruptHandler<RNG>;
+    // RNG => rng::InterruptHandler<RNG>;  // owned by nimble
     SAADC => saadc::InterruptHandler;
 });
+
+use rand_core::{CryptoRng, RngCore};
+
+/// A dummy RNG implementation when hardware RNG is managed elsewhere (e.g., NimBLE).
+pub struct NoopRng;
+
+impl RngCore for NoopRng {
+    fn next_u32(&mut self) -> u32 {
+        0
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        0
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        dest.fill(0);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+// Marker trait asserting this RNG can be used where a secure RNG is required
+impl CryptoRng for NoopRng {}
 
 /// How many outgoing L2CAP buffers per link
 const L2CAP_TXQ: u8 = 3;
@@ -106,16 +133,14 @@ async fn main(spawner: Spawner) {
     spawner.spawn(read_ui(bus, stick_gate, trig_gate, adc, stick_sw).unwrap());
 
     // initialize BLE - black magic from trouble example
-    // let mut rng = rng::Rng::new(p.RNG, Irqs);
-    // let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
-
     apache_nimble::initialize_nimble();
     let controller = NimbleController::new();
     spawner.spawn(run_controller(controller.create_task()).unwrap());
 
     let stack = {
-        // ble_peripheral::build_stack(controller, &mut rng_2)
-        ble_peripheral::build_stack(controller)
+        // let mut rng = rng::Rng::new(p.RNG, Irqs);
+        // let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
+        ble_peripheral::build_stack(controller, &mut NoopRng)
     };
     ble_peripheral::run(bus, &stack).await;
 }
