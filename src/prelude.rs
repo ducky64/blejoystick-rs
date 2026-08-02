@@ -1,1 +1,1 @@
-pub use defmt::{debug, error, info, warn};
+pub use defmt::{debug, error, info, unwrap, warn};

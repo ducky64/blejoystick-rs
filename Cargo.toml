@@ -12,7 +12,7 @@ path = "./src/main.rs"
 cortex-m = { version = "0.7.6" }
 cortex-m-rt = "0.7.0"
 
-embassy-nrf = { version = "0.7", features = [
+embassy-nrf = { version = "0.8", features = [
     "defmt",
     "time-driver-rtc1",
     "gpiote",
@@ -22,13 +22,11 @@ embassy-nrf = { version = "0.7", features = [
     "nfc-pins-as-gpio",
 ] }
 
-# this is pinned to an older version
-# https://github.com/embassy-rs/trouble/blob/39c5c993042f37f7361091492502d3a65926f8fe/examples/nrf-sdc/Cargo.toml
-# this is the last version using a crates.io version of nrf-sdc, nrf-mpsl
-# newer version of embassy build those from versioned git instead of crates.io
-# and this PR breaks Windows builds because of use of git symlinks
-# # https://github.com/alexmoon/nrf-sdc/issues/84
-nrf-sdc = { version = "0.3", default-features = false, features = [
+# note: to build on Windows, symlink support must be enabled for git
+# if you just enabled symlinks, you may need to delete your ~/.cargo/git/checkouts/nrf-sdc folder to require it be re-cloned
+# https://github.com/alexmoon/nrf-sdc/issues/84
+# a crates.io release hasn't happened for a long while
+nrf-sdc = { version = "0.4", default-features = false, features = [
     "defmt",
     "peripheral",
     "nrf52840",
@@ -68,7 +66,6 @@ rand_chacha = { version = "0.3", default-features = false }
 
 # for 'ble_bas_peripheral_bonding'
 embassy-sync = { version = "0.7" }
-bt-hci = { version = "0.4", features = ["defmt"] }
 portable-atomic = "1"
 static_cell = "2"
 
@@ -98,3 +95,5 @@ overflow-checks = false
 
 [patch.crates-io]
 usbd-hid = { path = "../usbd-hid" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c" }

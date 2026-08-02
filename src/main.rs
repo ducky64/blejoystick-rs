@@ -54,14 +54,18 @@ use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, rng, saadc};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
+use rand_chacha::ChaCha12Rng;
+use rand_core::SeedableRng;
 
 bind_interrupts!(struct Irqs {
+    // BLE stack interrupts
     RNG => rng::InterruptHandler<RNG>;
     EGU0_SWI0 => nrf_sdc::mpsl::LowPrioInterruptHandler;
     CLOCK_POWER => nrf_sdc::mpsl::ClockInterruptHandler;
     RADIO => nrf_sdc::mpsl::HighPrioInterruptHandler;
     TIMER0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
     RTC0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
+    // application interrupts
     SAADC => saadc::InterruptHandler;
 });
 
@@ -81,7 +85,7 @@ const L2CAP_MTU: usize = 72;
 
 fn build_sdc<'d, const N: usize>(
     p: nrf_sdc::Peripherals<'d>,
-    rng: &'d mut rng::Rng<RNG, Async>,
+    rng: &'d mut rng::Rng<Async>,
     mpsl: &'d MultiprotocolServiceLayer,
     mem: &'d mut sdc::Mem<N>,
 ) -> Result<nrf_sdc::SoftdeviceController<'d>, nrf_sdc::Error> {
@@ -113,7 +117,7 @@ async fn main(spawner: Spawner) {
     let mut chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
 
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
-    spawner.spawn(blinky(led).unwrap());
+    spawner.spawn(unwrap!(blinky(led)));
 
     let mut stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let mut trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
@@ -125,7 +129,7 @@ async fn main(spawner: Spawner) {
     let y_pin = ChannelConfig::single_ended(p.P0_29.reborrow());
     let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
     let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
-    spawner.spawn(read_ui(bus, stick_gate, trig_gate, adc, stick_sw).unwrap());
+    spawner.spawn(unwrap!(read_ui(bus, stick_gate, trig_gate, adc, stick_sw)));
 
     // initialize BLE - black magic from trouble example
     let mpsl_p =
@@ -138,8 +142,14 @@ async fn main(spawner: Spawner) {
         skip_wait_lfclk_started: mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
     };
     static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
-    let mpsl = MPSL.init(mpsl::MultiprotocolServiceLayer::new(mpsl_p, Irqs, lfclk_cfg).unwrap());
-    spawner.spawn(mpsl_task(&*mpsl).unwrap());
+    static SESSION_MEM: StaticCell<mpsl::SessionMem<1>> = StaticCell::new();
+    let mpsl = MPSL.init(unwrap!(mpsl::MultiprotocolServiceLayer::with_timeslots(
+        mpsl_p,
+        Irqs,
+        lfclk_cfg,
+        SESSION_MEM.init(mpsl::SessionMem::new())
+    )));
+    spawner.spawn(unwrap!(mpsl_task(&*mpsl)));
 
     let sdc_p = sdc::Peripherals::new(
         p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
@@ -147,21 +157,14 @@ async fn main(spawner: Spawner) {
     );
 
     let mut rng = rng::Rng::new(p.RNG, Irqs);
+    let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
 
     let mut sdc_mem = sdc::Mem::<3312>::new();
     let sdc = build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem).unwrap();
 
-    // let radio = esp_radio::init().unwrap();
-    // let bluetooth = peripherals.BT;
-    // let connector = BleConnector::new(&radio, bluetooth, Default::default()).unwrap();
-    // let controller: ExternalController<_, 20> = ExternalController::new(connector);
-    // let stack = {
-    //     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
-    //     let mut trng = Trng::try_new().unwrap();
-    //     ble_peripheral::build_stack(controller, &mut trng)
-    // };
+    let stack = { ble_peripheral::build_stack(sdc, &mut rng_2) };
 
-    // ble_peripheral::run(bus, &stack).await;
+    ble_peripheral::run(bus, &stack).await;
 }
 
 fn adc12_to_u0f16(adc: i16) -> U0F16 {

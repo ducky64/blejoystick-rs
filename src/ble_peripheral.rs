@@ -392,7 +392,7 @@ impl RelativeAccummulator {
 
 fn sensitivity_mapping(input: I1F15) -> I1F15 {
     // a sensitivity mapping that is finer near the center but allows full-range at max
-    input / 2 + input * input.abs() / 2
+    (input / 2).saturating_add(input.saturating_mul(input.saturating_abs() / 2))
 }
 
 /// Example task to use the BLE notifier interface.
