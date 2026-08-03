@@ -90,8 +90,8 @@ fn build_sdc<'d, const N: usize>(
     mem: &'d mut sdc::Mem<N>,
 ) -> Result<nrf_sdc::SoftdeviceController<'d>, nrf_sdc::Error> {
     sdc::Builder::new()?
-        .support_adv()?
-        .support_peripheral()?
+        .support_adv()
+        .support_peripheral()
         .peripheral_count(1)?
         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
         .build(p, rng, mpsl, mem)
@@ -142,12 +142,8 @@ async fn main(spawner: Spawner) {
         skip_wait_lfclk_started: mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
     };
     static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
-    static SESSION_MEM: StaticCell<mpsl::SessionMem<1>> = StaticCell::new();
-    let mpsl = MPSL.init(unwrap!(mpsl::MultiprotocolServiceLayer::with_timeslots(
-        mpsl_p,
-        Irqs,
-        lfclk_cfg,
-        SESSION_MEM.init(mpsl::SessionMem::new())
+    let mpsl = MPSL.init(unwrap!(mpsl::MultiprotocolServiceLayer::new(
+        mpsl_p, Irqs, lfclk_cfg
     )));
     spawner.spawn(unwrap!(mpsl_task(&*mpsl)));
 
@@ -159,8 +155,8 @@ async fn main(spawner: Spawner) {
     let mut rng = rng::Rng::new(p.RNG, Irqs);
     let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
 
-    let mut sdc_mem = sdc::Mem::<3312>::new();
-    let sdc = build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem).unwrap();
+    let mut sdc_mem = sdc::Mem::<4720>::new();
+    let sdc = unwrap!(build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem));
 
     let stack = { ble_peripheral::build_stack(sdc, &mut rng_2) };
 
