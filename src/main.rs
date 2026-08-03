@@ -234,10 +234,10 @@ async fn read_ui(
 
         let btn_value = stick_sw.is_low();
 
-        // info!(
-        //     "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
-        //     x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
-        // );
+        debug!(
+            "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
+            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
+        );
 
         let joystick_state = JoystickState {
             x: x_linear,
