@@ -23,27 +23,17 @@ const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
 
 const STORED_CCCD_MAX: usize = 8;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Format)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Format)]
 struct StoredBondInformation {
-    addr: [u8; 6],
-    ltk: u128,
-    irk: Option<u128>,
-    security_level: u8,
+    bond_info: BondInformation,
     cccds: FormatLinearMap<u16, u16, STORED_CCCD_MAX>,
 }
 impl<'a> PostcardValue<'a> for StoredBondInformation {}
 
 impl StoredBondInformation {
-    pub fn from_bond_info(bond_info: &BondInformation) -> Self {
+    pub fn from_bond_info(bond_info: BondInformation) -> Self {
         Self {
-            addr: bond_info.identity.bd_addr.raw().try_into().unwrap(),
-            ltk: bond_info.ltk.0,
-            irk: bond_info.identity.irk.map(|i| i.0),
-            security_level: match bond_info.security_level {
-                SecurityLevel::Encrypted => 1,
-                SecurityLevel::EncryptedAuthenticated => 2,
-                SecurityLevel::NoEncryption => 0,
-            },
+            bond_info: bond_info,
             cccds: FormatLinearMap(LinearMap::new()),
         }
     }
@@ -56,24 +46,8 @@ impl StoredBondInformation {
         new
     }
 
-    pub fn security_level(&self) -> SecurityLevel {
-        match self.security_level {
-            1 => SecurityLevel::Encrypted,
-            2 => SecurityLevel::EncryptedAuthenticated,
-            _ => SecurityLevel::NoEncryption,
-        }
-    }
-
-    pub fn bond_info(&self) -> BondInformation {
-        BondInformation {
-            ltk: LongTermKey(self.ltk),
-            identity: Identity {
-                bd_addr: BdAddr::new(self.addr),
-                irk: self.irk.map(|i| IdentityResolvingKey(i)),
-            },
-            is_bonded: true,
-            security_level: self.security_level(),
-        }
+    pub fn bond_info(&self) -> &BondInformation {
+        &self.bond_info
     }
 
     pub fn cccd<const ENTRIES: usize>(&self) -> Option<CccdTable<ENTRIES>> {
@@ -122,7 +96,7 @@ where
     if let Some(stored_bond_info) = stored_bond_info {
         info!("Loaded bond information: {}", stored_bond_info);
         stack
-            .add_bond_information(stored_bond_info.bond_info())
+            .add_bond_information(stored_bond_info.bond_info().clone())
             .unwrap();
     } else {
         info!("No bond information found");
@@ -235,7 +209,7 @@ async fn gatt_events_task(
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    new_stored_bond_info = Some(StoredBondInformation::from_bond_info(&bond));
+                    new_stored_bond_info = Some(StoredBondInformation::from_bond_info(bond));
                 }
             }
             GattConnectionEvent::PairingFailed(err) => {
@@ -255,11 +229,7 @@ async fn gatt_events_task(
                         }
                     }
                     GattEvent::Write(event) => {
-                        info!(
-                            "[gatt] Write Event to Characteristic {}: {:?}",
-                            event.handle(),
-                            event.data()
-                        );
+                        info!("[gatt] Write Event to Characteristic {}", event.handle());
 
                         config_changed = true;
 
@@ -277,6 +247,10 @@ async fn gatt_events_task(
                 } else {
                     event.accept()
                 };
+                match reply_result {
+                    Ok(reply) => reply.send().await,
+                    Err(e) => warn!("[gatt] error sending response: {:?}", e),
+                }
 
                 // This needs to be processed after event.accept, otherwise the new values aren't ready
                 if config_changed {
@@ -284,11 +258,6 @@ async fn gatt_events_task(
                         let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
                         new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
                     }
-                }
-
-                match reply_result {
-                    Ok(reply) => reply.send().await,
-                    Err(e) => warn!("[gatt] error sending response: {:?}", e),
                 }
             }
             _ => {} // ignore other Gatt Connection Events
@@ -328,7 +297,7 @@ async fn advertise<'values, 'server, C: Controller>(
     let len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[
+            AdStructure::IncompleteServiceUuids16(&[
                 service::BATTERY.to_le_bytes(),
                 service::HUMAN_INTERFACE_DEVICE.to_le_bytes(),
             ]),

@@ -54,7 +54,7 @@ embassy-executor = { version = "0.10", features = [
     "defmt",
 ] }
 
-trouble-host = { version = "0.7", features = ["security", "defmt"] }
+trouble-host = { version = "0.7", features = ["serde", "security", "defmt"] }
 
 # for BLE 'security' feature
 sequential-storage = { version = "8.0", features = [
