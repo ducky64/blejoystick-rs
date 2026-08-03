@@ -204,35 +204,40 @@ async fn read_ui(
     mut adc: Saadc<'static, 3>,
     stick_sw: Input<'static>,
 ) {
-    const CENTER_X: U0F16 = U0F16::lit("0.70");
-    const CENTER_Y: U0F16 = U0F16::lit("0.71");
-    const FULLSCALE_XY: U0F16 = U0F16::lit("0.20"); // half-span, including of deadzone
+    const CENTER_X: U0F16 = U0F16::lit("0.44");
+    const CENTER_Y: U0F16 = U0F16::lit("0.48");
+    const FULLSCALE_XY: U0F16 = U0F16::lit("0.40"); // half-span, including of deadzone
     const DEADZONE_XY: U0F16 = U0F16::lit("0.02");
 
     let josytick_state_sender = bus.joystick_state.sender();
 
-    stick_gate.set_low();
-    trig_gate.set_high();
-
     loop {
         let mut buf = [0; 3];
-        adc.sample(&mut buf).await;
-        let x_adc = buf[0];
-        let y_adc = buf[1];
-        let trig_adc = buf[2];
+        stick_gate.set_low();
+        trig_gate.set_low();
+        Timer::after_millis(3).await;
 
-        let x_linear = scale_bipolar(adc12_to_u0f16(x_adc), CENTER_X, FULLSCALE_XY, DEADZONE_XY);
-        let y_linear = scale_bipolar(adc12_to_u0f16(y_adc), CENTER_Y, FULLSCALE_XY, DEADZONE_XY);
-        let trig_linear = adc12_to_u0f16(trig_adc)
+        adc.sample(&mut buf).await;
+
+        stick_gate.set_high();
+        trig_gate.set_high();
+
+        let x_adc = adc12_to_u0f16(buf[0]);
+        let y_adc = adc12_to_u0f16(buf[1]);
+        let trig_adc = adc12_to_u0f16(buf[2]);
+
+        let x_linear = scale_bipolar(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY);
+        let y_linear = scale_bipolar(y_adc, CENTER_Y, FULLSCALE_XY, DEADZONE_XY);
+        let trig_linear = trig_adc
             .saturating_sub(U0F16::lit("0.55"))
             .saturating_div(U0F16::lit("0.2"));
 
         let btn_value = stick_sw.is_low();
 
-        info!(
-            "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
-            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
-        );
+        // info!(
+        //     "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
+        //     x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
+        // );
 
         let joystick_state = JoystickState {
             x: x_linear,

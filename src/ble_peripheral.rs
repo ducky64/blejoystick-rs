@@ -1,7 +1,7 @@
 use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 use fixed::types::{I16F16, I1F15};
 use heapless::LinearMap;
 use rand_core::{CryptoRng, RngCore};
@@ -169,7 +169,8 @@ where
                     info!("Connection dropped");
                 }
                 Err(e) => {
-                    panic!("[adv] error: {:?}", defmt::Debug2Format(&e));
+                    error!("[adv] error: {:?}", defmt::Debug2Format(&e));
+                    Timer::after_millis(100).await; // wait a bit before retrying
                 }
             }
         }
@@ -382,8 +383,12 @@ impl RelativeAccummulator {
     }
 
     pub fn update(&mut self, input: I1F15, dt: Duration) -> i8 {
-        self.accum += I16F16::from_num(input)
-            * (self.ticks_per_second * I16F16::saturating_from_num(dt.as_millis()) / 1000);
+        use core::cmp::min;
+
+        self.accum += I16F16::from_num(input).saturating_mul(
+            self.ticks_per_second
+                .saturating_mul(I16F16::saturating_from_num(dt.as_millis()) / 1000),
+        );
         let output = self.accum.to_num::<i8>();
         self.accum -= I16F16::from_num(output);
         output
