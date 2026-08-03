@@ -49,7 +49,7 @@ impl Key for StorageKey {
         }
     }
 
-    fn get_len(buffer: &[u8]) -> Result<usize, SerializationError> {
+    fn get_len(_buffer: &[u8]) -> Result<usize, SerializationError> {
         Ok(1)
     }
 }

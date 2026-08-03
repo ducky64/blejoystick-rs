@@ -54,8 +54,6 @@ use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, rng, saadc};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
-use rand_chacha::ChaCha12Rng;
-use rand_core::SeedableRng;
 
 bind_interrupts!(struct Irqs {
     // BLE stack interrupts
@@ -114,13 +112,13 @@ async fn main(spawner: Spawner) {
 
     // initialise peripherals and tasks
     // pull high to enable charging, low to disable
-    let mut chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
+    let chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
 
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     spawner.spawn(unwrap!(blinky(led)));
 
-    let mut stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
-    let mut trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
+    let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
+    let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
 
     let bumper = Input::new(p.P0_31, Pull::Up);
     let stick_sw = Input::new(p.P0_05, Pull::Up);
@@ -153,14 +151,11 @@ async fn main(spawner: Spawner) {
     );
 
     let mut rng = rng::Rng::new(p.RNG, Irqs);
-    let mut rng_2 = ChaCha12Rng::from_rng(&mut rng).unwrap();
 
     let mut sdc_mem = sdc::Mem::<4720>::new();
     let sdc = unwrap!(build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem));
 
-    let stack = { ble_peripheral::build_stack(sdc, &mut rng_2) };
-
-    ble_peripheral::run(bus, &stack).await;
+    ble_peripheral::run(bus, sdc).await;
 }
 
 fn adc12_to_u0f16(adc: i16) -> U0F16 {

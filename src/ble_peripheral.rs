@@ -4,11 +4,9 @@ use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
 use fixed::types::{I16F16, I1F15};
 use heapless::LinearMap;
-use rand_core::{CryptoRng, RngCore};
 
 use sequential_storage::map::PostcardValue;
 use serde::{Deserialize, Serialize};
-use static_cell::StaticCell;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::AsInputReport;
 
@@ -95,33 +93,22 @@ impl StoredBondInformation {
     }
 }
 
-static RESOURCES: StaticCell<
-    HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>,
-> = StaticCell::new();
-
-/// Build the BLE stack, temporarily acquiring resources needed for construction
-pub fn build_stack<'a, C, TRNG>(controller: C, trng: &mut TRNG) -> Stack<'a, C, DefaultPacketPool>
+/// Run the BLE stack.
+pub async fn run<'a, C>(bus: &'static GlobalBus, controller: C)
 where
     C: Controller + 'a,
-    TRNG: RngCore + CryptoRng,
 {
     // Using a fixed "random" address can be useful for testing. In real scenarios, one would
     // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
     let address: Address = Address::random([0xff, 0x8f, 0x08, 0x05, 0xe4, 0xff]);
     info!("Our address = {}", address);
 
-    let resources = RESOURCES.init(HostResources::new());
-
-    return trouble_host::new(controller, resources)
+    let mut resources: HostResources<_, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
+        HostResources::new();
+    let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address)
-        .set_random_generator_seed(trng);
-}
+        .build();
 
-/// Run the BLE stack.
-pub async fn run<'a, C>(bus: &'static GlobalBus, stack: &'a Stack<'a, C, DefaultPacketPool>)
-where
-    C: Controller + 'a,
-{
     let stored_bond_info = {
         let mut storage = bus.storage.lock().await;
         let mut buf = [0u8; 128];
@@ -141,16 +128,13 @@ where
         info!("No bond information found");
     };
 
-    let Host {
-        mut peripheral,
-        runner,
-        ..
-    } = stack.build();
+    let runner = stack.runner();
+    let mut peripheral = stack.peripheral();
 
     info!("Starting advertising and GATT service");
-    let server: Server<'_> = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
+    let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: DEVICE_NAME,
-        appearance: &appearance::human_interface_device::GAMEPAD,
+        appearance: &appearance::human_interface_device::GENERIC_HUMAN_INTERFACE_DEVICE,
     }))
     .unwrap();
 
@@ -383,8 +367,6 @@ impl RelativeAccummulator {
     }
 
     pub fn update(&mut self, input: I1F15, dt: Duration) -> i8 {
-        use core::cmp::min;
-
         self.accum += I16F16::from_num(input).saturating_mul(
             self.ticks_per_second
                 .saturating_mul(I16F16::saturating_from_num(dt.as_millis()) / 1000),
