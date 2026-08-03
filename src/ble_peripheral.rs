@@ -255,7 +255,7 @@ async fn gatt_events_task(
                 // This needs to be processed after event.accept, otherwise the new values aren't ready
                 if config_changed {
                     if let Some(stored_bond_info) = stored_bond_info.as_ref() {
-                        let cccd_table = server.get_cccd_table(conn.raw()).unwrap();
+                        let cccd_table = server.get_client_att_table(conn.raw()).unwrap();
                         new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
                     }
                 }
