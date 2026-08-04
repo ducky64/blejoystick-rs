@@ -74,7 +74,7 @@ embassy-time = { version = "0.5", features = ["defmt"] }
 
 # peripherals
 embedded-hal-nb = "1.0.0"
-usbd-hid = "0.9"
+usbd-hid = "0.10.1"
 
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 # embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
@@ -94,6 +94,5 @@ opt-level = 's'
 overflow-checks = false
 
 [patch.crates-io]
-usbd-hid = { path = "../usbd-hid" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "e1fbb89a173dfc053ec4877d366f51804eac498d" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "e1fbb89a173dfc053ec4877d366f51804eac498d" }
