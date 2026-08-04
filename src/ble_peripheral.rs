@@ -219,16 +219,12 @@ async fn gatt_events_task(
                     GattEvent::Write(event) => {
                         info!("[gatt] Write Event to Characteristic {}", event.handle());
 
-                        if (server.battery_service.level.cccd_handle)
-                            .map_or(false, |handle| event.handle() == handle)
-                            || (server.mouse_service.hid_control_point.cccd_handle)
-                                .map_or(false, |handle| event.handle() == handle)
-                            || (server.mouse_service.hid_info.cccd_handle)
-                                .map_or(false, |handle| event.handle() == handle)
-                            || (server.mouse_service.protocol_mode.cccd_handle)
-                                .map_or(false, |handle| event.handle() == handle)
-                            || (server.mouse_service.report.cccd_handle)
-                                .map_or(false, |handle| event.handle() == handle)
+                        const CLIENT_CHARACTERISTIC_CONFIGURATION: Uuid = Uuid::Uuid16(
+                            bt_hci::uuid::descriptors::CLIENT_CHARACTERISTIC_CONFIGURATION
+                                .to_le_bytes(),
+                        );
+                        if Some(CLIENT_CHARACTERISTIC_CONFIGURATION)
+                            == server.table().uuid(event.handle())
                         {
                             cccd_changed_handle = Some(event.handle());
                         }

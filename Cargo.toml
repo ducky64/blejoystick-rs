@@ -54,6 +54,7 @@ embassy-executor = { version = "0.10", features = [
     "defmt",
 ] }
 
+bt-hci = { version = "0.9", features = ["defmt"] }
 trouble-host = { version = "0.7", features = ["serde", "security", "defmt"] }
 
 # for BLE 'security' feature
