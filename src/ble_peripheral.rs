@@ -38,33 +38,33 @@ impl StoredBondInformation {
         }
     }
 
-    pub fn with_cccd<const ENTRIES: usize>(&self, cccd: &CccdTable<ENTRIES>) -> Self {
-        let mut new = self.clone();
-        for (handle, value) in cccd.inner().iter() {
-            new.cccds.0.insert(*handle, value.raw()).ok();
-        }
-        new
-    }
+    // pub fn with_cccd<const ENTRIES: usize>(&self, cccd: &CccdTable<ENTRIES>) -> Self {
+    //     let mut new = self.clone();
+    //     for (handle, value) in cccd.inner().iter() {
+    //         new.cccds.0.insert(*handle, value.raw()).ok();
+    //     }
+    //     new
+    // }
 
     pub fn bond_info(&self) -> &BondInformation {
         &self.bond_info
     }
 
-    pub fn cccd<const ENTRIES: usize>(&self) -> Option<CccdTable<ENTRIES>> {
-        if self.cccds.0.is_empty() {
-            None
-        } else {
-            let mut entries = [(0u16, CCCD::default()); ENTRIES];
-            for (i, (handle, value)) in self.cccds.0.iter().enumerate() {
-                if i >= ENTRIES {
-                    error!("StoredBondInformation cccd has more entries than can fit in CccdTable");
-                    break;
-                }
-                entries[i] = (*handle, CCCD::from(*value));
-            }
-            Some(CccdTable::new(entries))
-        }
-    }
+    // pub fn cccd<const ENTRIES: usize>(&self) -> Option<CccdTable<ENTRIES>> {
+    //     if self.cccds.0.is_empty() {
+    //         None
+    //     } else {
+    //         let mut entries = [(0u16, CCCD::default()); ENTRIES];
+    //         for (i, (handle, value)) in self.cccds.0.iter().enumerate() {
+    //             if i >= ENTRIES {
+    //                 error!("StoredBondInformation cccd has more entries than can fit in CccdTable");
+    //                 break;
+    //             }
+    //             entries[i] = (*handle, CCCD::from(*value));
+    //         }
+    //         Some(CccdTable::new(entries))
+    //     }
+    // }
 }
 
 /// Run the BLE stack.
@@ -188,10 +188,10 @@ async fn gatt_events_task(
 
     // TODO delay restoring cccd until encryption confirmed
     stored_bond_info.as_ref().map(|stored_bond_info| {
-        stored_bond_info.cccd().map(|cccd| {
-            info!("[gatt] restored cccd table: {}", cccd);
-            server.set_cccd_table(conn.raw(), cccd)
-        })
+        // stored_bond_info.cccd().map(|cccd| {
+        //     info!("[gatt] restored cccd table: {}", cccd);
+        //     server.set_cccd_table(conn.raw(), cccd)
+        // })
     });
 
     let reason = loop {
@@ -216,7 +216,7 @@ async fn gatt_events_task(
                 error!("[gatt] pairing error: {:?}", err);
             }
             GattConnectionEvent::Gatt { event } => {
-                let mut config_changed = false;
+                let mut cccd_changed_handle: Option<u16> = None;
 
                 let result = match &event {
                     GattEvent::Read(event) => {
@@ -231,7 +231,19 @@ async fn gatt_events_task(
                     GattEvent::Write(event) => {
                         info!("[gatt] Write Event to Characteristic {}", event.handle());
 
-                        config_changed = true;
+                        if (server.battery_service.level.cccd_handle)
+                            .map_or(false, |handle| event.handle() == handle)
+                            || (server.mouse_service.hid_control_point.cccd_handle)
+                                .map_or(false, |handle| event.handle() == handle)
+                            || (server.mouse_service.hid_info.cccd_handle)
+                                .map_or(false, |handle| event.handle() == handle)
+                            || (server.mouse_service.protocol_mode.cccd_handle)
+                                .map_or(false, |handle| event.handle() == handle)
+                            || (server.mouse_service.report.cccd_handle)
+                                .map_or(false, |handle| event.handle() == handle)
+                        {
+                            cccd_changed_handle = Some(event.handle());
+                        }
 
                         if conn.raw().security_level()?.encrypted() {
                             None
@@ -253,10 +265,18 @@ async fn gatt_events_task(
                 }
 
                 // This needs to be processed after event.accept, otherwise the new values aren't ready
-                if config_changed {
+                if let Some(cccd_handle) = cccd_changed_handle {
                     if let Some(stored_bond_info) = stored_bond_info.as_ref() {
-                        let cccd_table = server.get_client_att_table(conn.raw()).unwrap();
-                        new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
+                        let att_table = server.get_client_att_table(conn.raw()).unwrap();
+                        let value = att_table.get(cccd_handle);
+                        info!(
+                            "config changed => {} {} {} {}",
+                            cccd_handle,
+                            value,
+                            att_table.raw().len(),
+                            att_table.raw()
+                        );
+                        // new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
                     }
                 }
             }
@@ -406,7 +426,7 @@ async fn custom_task<C: Controller, P: PacketPool>(
         let mut buf = [0u8; MouseReport::SIZE];
         report.serialize(&mut buf).unwrap();
         let _ = hid_report
-            .notify(conn, &buf)
+            .notify(conn, &buf, false)
             .await
             .inspect_err(|e| error!("failed to notify: {}", e));
 
