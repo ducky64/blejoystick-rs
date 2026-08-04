@@ -38,33 +38,19 @@ impl StoredBondInformation {
         }
     }
 
-    // pub fn with_cccd<const ENTRIES: usize>(&self, cccd: &CccdTable<ENTRIES>) -> Self {
-    //     let mut new = self.clone();
-    //     for (handle, value) in cccd.inner().iter() {
-    //         new.cccds.0.insert(*handle, value.raw()).ok();
-    //     }
-    //     new
-    // }
+    pub fn added_cccd(&self, handle: u16, value: u16) -> Self {
+        let mut new = self.clone();
+        new.cccds.0.insert(handle, value).ok();
+        new
+    }
 
     pub fn bond_info(&self) -> &BondInformation {
         &self.bond_info
     }
 
-    // pub fn cccd<const ENTRIES: usize>(&self) -> Option<CccdTable<ENTRIES>> {
-    //     if self.cccds.0.is_empty() {
-    //         None
-    //     } else {
-    //         let mut entries = [(0u16, CCCD::default()); ENTRIES];
-    //         for (i, (handle, value)) in self.cccds.0.iter().enumerate() {
-    //             if i >= ENTRIES {
-    //                 error!("StoredBondInformation cccd has more entries than can fit in CccdTable");
-    //                 break;
-    //             }
-    //             entries[i] = (*handle, CCCD::from(*value));
-    //         }
-    //         Some(CccdTable::new(entries))
-    //     }
-    // }
+    pub fn cccds(&self) -> &LinearMap<u16, u16, STORED_CCCD_MAX> {
+        &self.cccds.0
+    }
 }
 
 /// Run the BLE stack.
@@ -188,10 +174,12 @@ async fn gatt_events_task(
 
     // TODO delay restoring cccd until encryption confirmed
     stored_bond_info.as_ref().map(|stored_bond_info| {
-        // stored_bond_info.cccd().map(|cccd| {
-        //     info!("[gatt] restored cccd table: {}", cccd);
-        //     server.set_cccd_table(conn.raw(), cccd)
-        // })
+        let mut att_table = server.get_client_att_table(conn.raw()).unwrap();
+        stored_bond_info.cccds().iter().for_each(|(handle, value)| {
+            att_table.write(*handle, 0, &value.to_le_bytes()).unwrap();
+            info!("[gatt] restored cccd: {}={}", handle, value);
+        });
+        server.set_client_att_table(conn.raw(), &att_table.view());
     });
 
     let reason = loop {
@@ -269,14 +257,12 @@ async fn gatt_events_task(
                     if let Some(stored_bond_info) = stored_bond_info.as_ref() {
                         let att_table = server.get_client_att_table(conn.raw()).unwrap();
                         let value = att_table.get(cccd_handle);
-                        info!(
-                            "config changed => {} {} {} {}",
-                            cccd_handle,
-                            value,
-                            att_table.raw().len(),
-                            att_table.raw()
-                        );
-                        // new_stored_bond_info = Some(stored_bond_info.with_cccd(&cccd_table));
+                        if let Some([b0, b1]) = value {
+                            let value_u16 = u16::from_le_bytes([*b0, *b1]);
+                            info!("cccd changed => {}={}", cccd_handle, value_u16);
+                            new_stored_bond_info =
+                                Some(stored_bond_info.added_cccd(cccd_handle, value_u16));
+                        }
                     }
                 }
             }
