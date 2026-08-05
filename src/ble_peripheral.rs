@@ -170,16 +170,15 @@ async fn gatt_events_task(
                     .match_address(&conn.raw().peer_address())
             })
     };
-    info!("[gatt] loaded stored bond info: {:?}", stored_bond_info);
 
     // TODO delay restoring cccd until encryption confirmed
     stored_bond_info.as_ref().map(|stored_bond_info| {
         let mut att_table = server.get_client_att_table(conn.raw()).unwrap();
         stored_bond_info.cccds().iter().for_each(|(handle, value)| {
             att_table.write(*handle, 0, &value.to_le_bytes()).unwrap();
-            info!("[gatt] restored cccd: {}={}", handle, value);
         });
         server.set_client_att_table(conn.raw(), &att_table.view());
+        info!("[gatt] restored stored bond info: {:?}", stored_bond_info);
     });
 
     let reason = loop {

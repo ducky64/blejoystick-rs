@@ -80,6 +80,10 @@ usbd-hid = "0.10.1"
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 # embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
 
+ina219 = "0.2"
+lsm6ds3tr = "0.2"
+qmc5883p = "1.0"
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

@@ -26,18 +26,17 @@ use panic_probe as _;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 
 use usbd_hid::descriptor::SerializedDescriptor;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
+mod joystick;
 mod prelude;
 mod util;
-use crate::bus::{GlobalBus, JoystickState};
+use crate::joystick::joystick_task;
 use crate::prelude::*;
-
-use fixed::types::{I16F16, I1F15, U0F16};
 
 use embassy_executor::Spawner;
 
@@ -45,15 +44,20 @@ use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
+use embassy_nrf::twim::{self, Twim};
 use embassy_time::{Duration, Timer};
 
 static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Saadc<'static, 3>>> = StaticCell::new();
 
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;
-use embassy_nrf::{bind_interrupts, rng, saadc};
+use embassy_nrf::{bind_interrupts, peripherals, rng, saadc};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
+
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+type I2cBus = Mutex<NoopRawMutex, Twim<'static>>;
+static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
     // BLE stack interrupts
@@ -65,6 +69,7 @@ bind_interrupts!(struct Irqs {
     RTC0 => nrf_sdc::mpsl::HighPrioInterruptHandler;
     // application interrupts
     SAADC => saadc::InterruptHandler;
+    TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
 });
 
 #[embassy_executor::task]
@@ -100,15 +105,22 @@ async fn main(spawner: Spawner) {
     let mut p = embassy_nrf::init(Default::default());
     info!("Starting!");
 
-    info!(
-        "descriptor ({}) {:02x}",
-        ble_descriptors::MouseReport::desc().len(),
-        ble_descriptors::MouseReport::desc()
-    );
-
     // initialize global state and shared peripherals
     let flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
+
+    // Shared I2C bus
+    let twi_config = twim::Config::default();
+    static RAM_BUFFER: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
+    let mut twi = Twim::new(
+        p.TWISPI0,
+        Irqs,
+        p.P1_00,
+        p.P0_22,
+        twi_config,
+        RAM_BUFFER.take(),
+    );
+    let i2c_bus = I2C_BUS.init(Mutex::new(twi));
 
     // initialise peripherals and tasks
     // pull high to enable charging, low to disable
@@ -127,7 +139,9 @@ async fn main(spawner: Spawner) {
     let y_pin = ChannelConfig::single_ended(p.P0_29.reborrow());
     let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
     let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
-    spawner.spawn(unwrap!(read_ui(bus, stick_gate, trig_gate, adc, stick_sw)));
+    spawner.spawn(unwrap!(joystick_task(
+        bus, stick_gate, trig_gate, adc, stick_sw
+    )));
 
     // initialize BLE - black magic from trouble example
     let mpsl_p =
@@ -156,89 +170,6 @@ async fn main(spawner: Spawner) {
     let sdc = unwrap!(build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem));
 
     ble_peripheral::run(bus, sdc).await;
-}
-
-fn adc12_to_u0f16(adc: i16) -> U0F16 {
-    // converts a unsigned raw 12-bit adc reading to U0F16, using the entire range
-    U0F16::from_bits(((adc as u16) << 4) | ((adc as u16) >> 8))
-}
-
-fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -> I1F15 {
-    // takes a adc reading [0, 1) and maps it to a bipolar range [-1, 1), with a configurable center, full-scale, and deadzone
-    // full-scale and deadzone are both half-span
-    // convert everything to larger working type
-    let adc = I16F16::from_num(adc);
-    let center = I16F16::from_num(center);
-    let fullscale = I16F16::from_num(fullscale);
-    let deadzone = I16F16::from_num(deadzone);
-
-    let scale_except_deadzone = fullscale - deadzone;
-    let adc_offset = if adc > center + deadzone {
-        adc - center - deadzone
-    } else if adc < center - deadzone {
-        adc - (center - deadzone)
-    } else {
-        I16F16::ZERO
-    };
-    I1F15::saturating_from_num(I16F16::saturating_div(adc_offset, scale_except_deadzone))
-}
-
-// the ADC API seems to be a bit of a dumpster fire
-// https://github.com/esp-rs/esp-hal/issues/449
-// such that it was removed int he embedded hal 1.0 API
-// https://github.com/rust-embedded/embedded-hal/pull/376
-#[embassy_executor::task]
-async fn read_ui(
-    bus: &'static GlobalBus,
-    mut stick_gate: Output<'static>,
-    mut trig_gate: Output<'static>,
-    mut adc: Saadc<'static, 3>,
-    stick_sw: Input<'static>,
-) {
-    const CENTER_X: U0F16 = U0F16::lit("0.44");
-    const CENTER_Y: U0F16 = U0F16::lit("0.48");
-    const FULLSCALE_XY: U0F16 = U0F16::lit("0.40"); // half-span, including of deadzone
-    const DEADZONE_XY: U0F16 = U0F16::lit("0.02");
-
-    let josytick_state_sender = bus.joystick_state.sender();
-
-    loop {
-        let mut buf = [0; 3];
-        stick_gate.set_low();
-        trig_gate.set_low();
-        Timer::after_millis(3).await;
-
-        adc.sample(&mut buf).await;
-
-        stick_gate.set_high();
-        trig_gate.set_high();
-
-        let x_adc = adc12_to_u0f16(buf[0]);
-        let y_adc = adc12_to_u0f16(buf[1]);
-        let trig_adc = adc12_to_u0f16(buf[2]);
-
-        let x_linear = scale_bipolar(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY);
-        let y_linear = scale_bipolar(y_adc, CENTER_Y, FULLSCALE_XY, DEADZONE_XY);
-        let trig_linear = trig_adc
-            .saturating_sub(U0F16::lit("0.55"))
-            .saturating_div(U0F16::lit("0.2"));
-
-        let btn_value = stick_sw.is_low();
-
-        debug!(
-            "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
-            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
-        );
-
-        let joystick_state = JoystickState {
-            x: x_linear,
-            y: y_linear,
-            trig: I1F15::from_num(trig_linear),
-            btn: false, //btn_value,
-        };
-        josytick_state_sender.send(joystick_state);
-        Timer::after(Duration::from_millis(20)).await;
-    }
 }
 
 // #[embassy_executor::task]
