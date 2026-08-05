@@ -80,7 +80,7 @@ usbd-hid = "0.10.1"
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 # embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
 
-ina219 = "0.2"
+ina219 = { version = "0.2", features = ["defmt"] }
 lsm6ds3tr = "0.2"
 qmc5883p = "1.0"
 

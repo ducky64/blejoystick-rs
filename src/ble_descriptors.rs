@@ -91,7 +91,7 @@ pub(crate) struct MouseService {
 #[gatt_server]
 #[allow(dead_code)]
 pub(crate) struct Server {
-    pub(crate) device_information: DeviceInformationService,
+    pub(crate) _device_information: DeviceInformationService,
     pub(crate) battery_service: BatteryService,
     pub(crate) mouse_service: MouseService,
 }

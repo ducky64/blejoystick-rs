@@ -28,13 +28,14 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::{ConstStaticCell, StaticCell};
 
-use usbd_hid::descriptor::SerializedDescriptor;
+mod battery;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
 mod joystick;
 mod prelude;
 mod util;
+use crate::battery::battery_task;
 use crate::joystick::joystick_task;
 use crate::prelude::*;
 
@@ -47,16 +48,13 @@ use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_nrf::twim::{self, Twim};
 use embassy_time::{Duration, Timer};
 
-static ADC_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, Saadc<'static, 3>>> = StaticCell::new();
-
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, peripherals, rng, saadc};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-type I2cBus = Mutex<NoopRawMutex, Twim<'static>>;
+type I2cBus = Mutex<CriticalSectionRawMutex, Twim<'static>>;
 static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
@@ -112,7 +110,7 @@ async fn main(spawner: Spawner) {
     // Shared I2C bus
     let twi_config = twim::Config::default();
     static RAM_BUFFER: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
-    let mut twi = Twim::new(
+    let twi = Twim::new(
         p.TWISPI0,
         Irqs,
         p.P1_00,
@@ -124,7 +122,8 @@ async fn main(spawner: Spawner) {
 
     // initialise peripherals and tasks
     // pull high to enable charging, low to disable
-    let chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
+    let chg_en = Output::new(p.P1_11, Level::Low, OutputDrive::Standard);
+    spawner.spawn(unwrap!(battery_task(bus, i2c_bus, chg_en)));
 
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     spawner.spawn(unwrap!(blinky(led)));
@@ -171,24 +170,6 @@ async fn main(spawner: Spawner) {
 
     ble_peripheral::run(bus, sdc).await;
 }
-
-// #[embassy_executor::task]
-// async fn read_bat(
-//     bus: &'static GlobalBus,
-//     adc_mutex: &'static Mutex<CriticalSectionRawMutex, Adc<'static, ADC1<'static>, Async>>,
-//     mut vbat_pin: AdcPin<GPIO0<'static>, ADC1<'static>>,
-// ) {
-//     let vbus_sender = bus.vbat.sender();
-//     loop {
-//         let vbat_value = {
-//             let mut adc = adc_mutex.lock().await;
-//             adc.read_oneshot(&mut vbat_pin).await
-//         };
-//         debug!("read vbat {}", vbat_value);
-//         vbus_sender.send(vbat_value); // TODO SCALING
-//         Timer::after(Duration::from_millis(1000)).await;
-//     }
-// }
 
 #[embassy_executor::task]
 async fn blinky(mut led: Output<'static>) {
