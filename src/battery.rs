@@ -21,23 +21,36 @@ pub(crate) async fn battery_task(
 ) {
     let vbus_sender = bus.vbat.sender();
     let calib = IntCalibration::new(MicroAmpere(100_000), 100_000).unwrap();
-    let mut ina = AsyncIna219::new_calibrated(
-        I2cDevice::new(&i2c_bus),
-        Address::from_byte(0x40).unwrap(),
-        calib,
-    )
-    .await
-    .unwrap();
-    let ina_config = Configuration {
+    let config = Configuration {
         operating_mode: OperatingMode::Triggered(MeasuredSignals::BusVoltage),
         ..Configuration::default()
     };
-    ina.set_configuration(ina_config).await.unwrap();
+
+    let mut ina = match async {
+        // discard errors since they are not consistently typed
+        let mut dev = AsyncIna219::new_calibrated(
+            I2cDevice::new(&i2c_bus),
+            Address::from_byte(0x40).unwrap(),
+            calib,
+        )
+        .await
+        .map_err(|_| ())?;
+        dev.set_configuration(config).await.map_err(|_| ())?;
+        Ok::<_, ()>(dev)
+    }
+    .await
+    {
+        Ok(dev) => dev,
+        Err(_) => {
+            error!("INA219: failed to initialize");
+            return;
+        }
+    };
 
     // TODO charging control with voltage cutoff
     chg_en.set_high();
 
-    let conversion_time_us = ina_config.conversion_time_us().unwrap();
+    let conversion_time_us = config.conversion_time_us().unwrap();
     loop {
         ina.trigger().await.unwrap();
         Timer::after_micros(conversion_time_us as u64).await;
