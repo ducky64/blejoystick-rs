@@ -1,6 +1,6 @@
 use defmt::Format;
 use embassy_futures::join::join;
-use embassy_futures::select::select;
+use embassy_futures::select::select3;
 use embassy_time::{Duration, Instant, Timer};
 use fixed::types::{I16F16, I1F15};
 use heapless::LinearMap;
@@ -106,10 +106,11 @@ where
                     conn.raw().set_bondable(true).unwrap();
                     // set up tasks when the connection is established to a central, so they don't run when no one is connected.
                     let a = gatt_events_task(bus, &server, &conn);
-                    let b = custom_task(bus, &server, &conn, &stack);
+                    let b = joystick_task(bus, &server, &conn, &stack);
+                    let c = battery_task(bus, &server, &conn);
                     // run until any task ends (usually because the connection has been closed),
                     // then return to advertising state.
-                    select(a, b).await;
+                    select3(a, b, c).await;
                     info!("Connection dropped");
                 }
                 Err(e) => {
@@ -352,11 +353,7 @@ fn sensitivity_mapping(input: I1F15) -> I1F15 {
     (input / 2).saturating_add(input.saturating_mul(input.saturating_abs() / 2))
 }
 
-/// Example task to use the BLE notifier interface.
-/// This task will notify the connected central of a counter value every 2 seconds.
-/// It will also read the RSSI value every 2 seconds.
-/// and will stop when the connection is closed by the central or an error occurs.
-async fn custom_task<C: Controller, P: PacketPool>(
+async fn joystick_task<C: Controller, P: PacketPool>(
     bus: &'static GlobalBus,
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
@@ -364,7 +361,6 @@ async fn custom_task<C: Controller, P: PacketPool>(
 ) {
     let mut joystick_reader = bus.joystick_state.receiver().unwrap();
 
-    let level = server.battery_service.level; // TODO move out
     let hid_report = server.mouse_service.report;
 
     let mut last_tick = Instant::now();
@@ -402,8 +398,6 @@ async fn custom_task<C: Controller, P: PacketPool>(
             continue; // don't send reports if nothing changed
         }
 
-        // info!("report: {}", report);
-
         let mut buf = [0u8; MouseReport::SIZE];
         report.serialize(&mut buf).unwrap();
         let _ = hid_report
@@ -418,5 +412,22 @@ async fn custom_task<C: Controller, P: PacketPool>(
             info!("[custom_task] error getting RSSI");
             break;
         };
+    }
+}
+
+async fn battery_task<P: PacketPool>(
+    bus: &'static GlobalBus,
+    server: &Server<'_>,
+    conn: &GattConnection<'_, '_, P>,
+) {
+    let level = server.battery_service.level;
+    let mut vbat_soc_reader = bus.vbat_soc.receiver().unwrap();
+
+    loop {
+        let vbat_soc = vbat_soc_reader.changed().await;
+        let _ = level
+            .notify(conn, &vbat_soc, true)
+            .await
+            .inspect_err(|e| error!("failed to notify: {}", e));
     }
 }

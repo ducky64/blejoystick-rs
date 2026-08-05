@@ -65,7 +65,8 @@ pub struct GlobalBus {
     >,
 
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
-    pub vbat: Watch<CriticalSectionRawMutex, u16, 2>, // in mV
+    pub vbat_mv: Watch<CriticalSectionRawMutex, u16, 2>,
+    pub vbat_soc: Watch<CriticalSectionRawMutex, u8, 2>,  // 0 - 100 inclusive
 }
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
@@ -81,6 +82,7 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
         storage: Mutex::new(storage),
 
         joystick_state: Watch::new(),
-        vbat: Watch::new(),
+        vbat_mv: Watch::new(),
+        vbat_soc: Watch::new(),
     })
 }

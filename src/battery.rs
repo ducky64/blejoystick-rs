@@ -13,13 +13,50 @@ use ina219::calibration::{IntCalibration, MicroAmpere};
 use ina219::configuration::{Configuration, MeasuredSignals, OperatingMode};
 use ina219::AsyncIna219;
 
+// generic approximation; TODO characterization or authoritative source
+const LIPO_V_SOC: [(u16, u16); 7] = [
+    (3300, 0),
+    (3600, 8),
+    (3700, 18),
+    (3770, 40),
+    (3850, 60),
+    (4000, 84),
+    (4200, 100),
+];
+
+// it turns out a bunch of interp crates are not no_std
+use core::ops::{Add, Div, Mul, Sub};
+fn interpolate_1d<X, Y>(breakpoints: &[(X, Y)], x: X) -> Y
+where
+    X: PartialOrd + Copy + Sub<Output = X>,
+    Y: Copy + Add<Output = Y> + Sub<Output = Y> + Mul<X, Output = Y> + Div<X, Output = Y>,
+{
+    assert!(!breakpoints.is_empty(), "breakpoints slice cannot be empty");
+
+    for window in breakpoints.windows(2) {
+        let (x0, y0) = window[0];
+        let (x1, y1) = window[1];
+
+        if x < x0 {
+            return y0; // clamp to lowest
+        } else if x >= x0 && x <= x1 {
+            let dx = x1 - x0;
+            let dy = y1 - y0;
+            let offset = x - x0;
+            return y0 + (dy * offset) / dx;
+        }
+    }
+    breakpoints.last().unwrap().1 // clamp to highest
+}
+
 #[embassy_executor::task]
 pub(crate) async fn battery_task(
     bus: &'static GlobalBus,
     i2c_bus: &'static I2cBus,
     mut chg_en: Output<'static>,
 ) {
-    let vbus_sender = bus.vbat.sender();
+    let vbus_mv_sender = bus.vbat_mv.sender();
+    let vbus_soc_sender = bus.vbat_soc.sender();
     let calib = IntCalibration::new(MicroAmpere(100_000), 100_000).unwrap();
     let config = Configuration {
         operating_mode: OperatingMode::Triggered(MeasuredSignals::BusVoltage),
@@ -57,8 +94,13 @@ pub(crate) async fn battery_task(
 
         let meas = ina.next_measurement().await.unwrap();
         if let Some(meas) = meas {
-            info!("INA219: v={}, i={}", meas.bus_voltage, meas.current);
-            vbus_sender.send(meas.bus_voltage.voltage_mv());
+            let soc = interpolate_1d(&LIPO_V_SOC, meas.bus_voltage.voltage_mv()) as u8;
+            info!(
+                "INA219: v={}, i={}, soc={}",
+                meas.bus_voltage, meas.current, soc
+            );
+            vbus_mv_sender.send(meas.bus_voltage.voltage_mv());
+            vbus_soc_sender.send(soc);
         } else {
             warn!("INA219: measurement unavailable");
         }

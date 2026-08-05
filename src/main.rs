@@ -121,6 +121,9 @@ async fn main(spawner: Spawner) {
     let i2c_bus = I2C_BUS.init(Mutex::new(twi));
 
     // initialise peripherals and tasks
+    // power gate for battery connection
+    let pwr_gate = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
+
     // pull high to enable charging, low to disable
     let chg_en = Output::new(p.P1_11, Level::Low, OutputDrive::Standard);
     spawner.spawn(unwrap!(battery_task(bus, i2c_bus, chg_en)));
@@ -131,7 +134,7 @@ async fn main(spawner: Spawner) {
     let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
 
-    let bumper = Input::new(p.P0_31, Pull::Up);
+    let _bumper = Input::new(p.P0_31, Pull::Up);
     let stick_sw = Input::new(p.P0_05, Pull::Up);
 
     let x_pin = ChannelConfig::single_ended(p.P0_28.reborrow());
