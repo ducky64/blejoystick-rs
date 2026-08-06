@@ -117,7 +117,8 @@ dependencies = [
  "embassy-nrf",
  "embassy-sync",
  "embassy-time",
- "embedded-hal-nb",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "fixed",
  "heapless 0.9.2",
  "ina219",
@@ -714,16 +715,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
  "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "embedded-hal-nb"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fba4268c14288c828995299e59b12babdbe170f6c6d73731af1b4648142e8605"
-dependencies = [
- "embedded-hal 1.0.0",
- "nb 1.1.0",
 ]
 
 [[package]]

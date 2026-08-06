@@ -29,14 +29,17 @@ use embassy_sync::mutex::Mutex;
 use static_cell::{ConstStaticCell, StaticCell};
 
 mod battery;
+mod imu;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
 mod joystick;
 mod prelude;
 mod util;
+mod async_to_blocking;
 use crate::battery::battery_task;
 use crate::joystick::joystick_task;
+use crate::imu::imu_task;
 use crate::prelude::*;
 
 use embassy_executor::Spawner;
@@ -127,6 +130,8 @@ async fn main(spawner: Spawner) {
     // pull high to enable charging, low to disable
     let chg_en = Output::new(p.P1_11, Level::Low, OutputDrive::Standard);
     spawner.spawn(unwrap!(battery_task(bus, i2c_bus, chg_en)));
+
+    spawner.spawn(unwrap!(imu_task(bus, i2c_bus)));
 
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     spawner.spawn(unwrap!(blinky(led)));

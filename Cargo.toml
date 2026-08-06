@@ -74,7 +74,8 @@ embassy-embedded-hal = "0.6.0"
 embassy-time = { version = "0.5", features = ["defmt"] }
 
 # peripherals
-embedded-hal-nb = "1.0.0"
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
 usbd-hid = "0.10.1"
 
 # embedded-io = { version = "0.6.1", features = ["defmt-03"] }
