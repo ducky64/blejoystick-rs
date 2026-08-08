@@ -23,6 +23,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary-int"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993a810118f8f37e9c4411c86f1c4c940a09a7ab34b7bf2d88d06f50c553fab7"
+
+[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -57,6 +63,29 @@ name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
+
+[[package]]
+name = "bilge"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "279c74986684d5cc7bbbd079aa448e8f852992cd385d85bb3a37e374c087b065"
+dependencies = [
+ "arbitrary-int",
+ "bilge-impl",
+]
+
+[[package]]
+name = "bilge-impl"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1176e49f42fe135cd2b56465e4f7d07038d3728f5e9f27fb2f08ed3fef75339"
+dependencies = [
+ "itertools",
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
 
 [[package]]
 name = "bindgen"
@@ -106,6 +135,7 @@ checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 name = "blejoystick-rs"
 version = "0.1.0"
 dependencies = [
+ "bilge",
  "bt-hci",
  "cortex-m",
  "cortex-m-rt",
@@ -117,12 +147,10 @@ dependencies = [
  "embassy-nrf",
  "embassy-sync",
  "embassy-time",
- "embedded-hal 1.0.0",
  "embedded-hal-async",
  "fixed",
  "heapless 0.9.2",
  "ina219",
- "lsm6ds3tr",
  "nrf-mpsl",
  "nrf-sdc",
  "panic-probe",
@@ -1108,15 +1136,6 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "lsm6ds3tr"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74968b469e4c72ca71e9245e4acdc8e946e53b2e7b8bd30ee655af596ef37d75"
-dependencies = [
- "embedded-hal 1.0.0",
 ]
 
 [[package]]

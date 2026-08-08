@@ -74,16 +74,15 @@ embassy-embedded-hal = "0.6.0"
 embassy-time = { version = "0.5", features = ["defmt"] }
 
 # peripherals
-embedded-hal = "1.0"
+# embedded-hal = "1.0"
 embedded-hal-async = "1.0"
 usbd-hid = "0.10.1"
 
-# embedded-io = { version = "0.6.1", features = ["defmt-03"] }
-# embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
-
 ina219 = { version = "0.2", features = ["defmt"] }
-lsm6ds3tr = "0.2"
 qmc5883p = "1.0"
+
+# for LSM6DS3 driver
+bilge = "0.3"
 
 [profile.dev]
 # Rust debug is too slow.

@@ -29,17 +29,17 @@ use embassy_sync::mutex::Mutex;
 use static_cell::{ConstStaticCell, StaticCell};
 
 mod battery;
-mod imu;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
+mod imu;
 mod joystick;
+mod lsm6ds3tr;
 mod prelude;
 mod util;
-mod async_to_blocking;
 use crate::battery::battery_task;
-use crate::joystick::joystick_task;
 use crate::imu::imu_task;
+use crate::joystick::joystick_task;
 use crate::prelude::*;
 
 use embassy_executor::Spawner;
