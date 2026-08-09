@@ -1,6 +1,6 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # runner = "probe-rs run --chip nRF52840_xxAA --speed 16000"
-runner = "rust-script ./.cargo/flash-runner.rs"
+runner = "rust-script ./.cargo/flash-runner.rs --chip nRF52840_xxAA --speed 16000"
 
 [build]
 target = "thumbv7em-none-eabihf"
