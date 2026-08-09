@@ -11,18 +11,26 @@ use crate::prelude::*;
 
 #[embassy_executor::task]
 pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) {
+    const SAMPLE_RATE_HZ: u16 = 100;
+
     let mut imu = match async {
         let mut dev = Lsm6ds3tr::new(I2cDevice::new(&i2c_bus));
         if !dev.check().await.map_err(|_| ())? {
             error!("IMU ID check failed"); // TODO should be fatal
         }
         dev.reset().await.map_err(|_| ())?;
-        dev.config_xl(lsm6ds3tr::OdrXl::Hz104, lsm6ds3tr::FsXl::G4)
-            .await
-            .map_err(|_| ())?;
-        dev.config_g(lsm6ds3tr::OdrG::Hz104, lsm6ds3tr::FsG::Dps500)
-            .await
-            .map_err(|_| ())?;
+        dev.config_xl(
+            lsm6ds3tr::OdrXl::new_at_least(SAMPLE_RATE_HZ),
+            lsm6ds3tr::FsXl::G4,
+        )
+        .await
+        .map_err(|_| ())?;
+        dev.config_g(
+            lsm6ds3tr::OdrG::new_at_least(SAMPLE_RATE_HZ),
+            lsm6ds3tr::FsG::Dps500,
+        )
+        .await
+        .map_err(|_| ())?;
         Ok::<_, ()>(dev)
     }
     .await

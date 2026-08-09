@@ -75,6 +75,24 @@ pub enum OdrXl {
     Reserved,
 }
 
+impl OdrXl {
+    pub fn new_at_least(freq_hz: u16) -> Self {
+        match freq_hz {
+            0..12 => Self::Hz12_5,
+            _ if freq_hz <= 12 => Self::Hz12_5,
+            _ if freq_hz <= 26 => Self::Hz26,
+            _ if freq_hz <= 52 => Self::Hz52,
+            _ if freq_hz <= 104 => Self::Hz104,
+            _ if freq_hz <= 208 => Self::Hz208,
+            _ if freq_hz <= 416 => Self::Hz416,
+            _ if freq_hz <= 833 => Self::Hz833,
+            _ if freq_hz <= 1660 => Self::Hz1k66,
+            _ if freq_hz <= 3330 => Self::Hz3k33,
+            _ => Self::Hz6k66,
+        }
+    }
+}
+
 #[bitsize(2)]
 #[derive(FromBits, Clone, Copy)]
 pub enum FsXl {
@@ -128,6 +146,23 @@ pub enum OdrG {
     Hz6k66 = 0b1010,
     #[fallback]
     Reserved,
+}
+
+impl OdrG {
+    pub fn new_at_least(freq_hz: u16) -> Self {
+        match freq_hz {
+            0..=12 => Self::Hz12_5,
+            _ if freq_hz <= 26 => Self::Hz26,
+            _ if freq_hz <= 52 => Self::Hz52,
+            _ if freq_hz <= 104 => Self::Hz104,
+            _ if freq_hz <= 208 => Self::Hz208,
+            _ if freq_hz <= 416 => Self::Hz416,
+            _ if freq_hz <= 833 => Self::Hz833,
+            _ if freq_hz <= 1660 => Self::Hz1k66,
+            _ if freq_hz <= 3330 => Self::Hz3k33,
+            _ => Self::Hz6k66,
+        }
+    }
 }
 
 #[bitsize(3)]
