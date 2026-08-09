@@ -7,7 +7,7 @@ use embedded_hal_async::i2c::{I2c, Operation};
 /// Transport layer that supports both SPI and I2C
 pub trait Transport {
     type Error;
-    async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), Self::Error>;
+    async fn write_u8(&mut self, addr: u8, data: u8) -> Result<(), Self::Error>;
     async fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error>;
 }
 
@@ -22,17 +22,8 @@ where
 {
     type Error = I2cType::Error;
 
-    async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), I2cType::Error> {
-        info!(
-            "Writing to I2C addr 0x{:02X}, reg 0x{:02X}, data: {:?}",
-            self.address, addr, data
-        );
-        self.i2c
-            .transaction(
-                self.address,
-                &mut [Operation::Write(&[addr]), Operation::Write(data)],
-            )
-            .await?;
+    async fn write_u8(&mut self, addr: u8, data: u8) -> Result<(), I2cType::Error> {
+        self.i2c.write(self.address, &[addr, data]).await?;
         Ok(())
     }
 
@@ -66,6 +57,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 #[repr(u8)]
 enum RegisterAddress {
     WhoAmI = 0x0F,
@@ -208,7 +200,7 @@ where
     pub async fn config_xl(&mut self, odr: OdrXl, fs: FsXl) -> Result<(), TransportType::Error> {
         let ctrl1 = Ctrl1Struct::new(Bw0Xl::Hz1k5, false, fs, odr);
         self.transport
-            .write(RegisterAddress::Ctrl1Xl as u8, &[ctrl1.value])
+            .write_u8(RegisterAddress::Ctrl1Xl as u8, ctrl1.value)
             .await?;
         Ok(())
     }
@@ -226,12 +218,12 @@ where
         })
     }
 
-    pub async fn read_temp_raw(&mut self) -> Result<i16, TransportType::Error> {
+    pub async fn read_temp_raw(&mut self) -> Result<u16, TransportType::Error> {
         let mut buffer = [0u8; 2];
         self.transport
             .read(RegisterAddress::OutTempL as u8, &mut buffer)
             .await?;
-        Ok(i16::from_le_bytes(buffer))
+        Ok(u16::from_le_bytes(buffer))
     }
 
     pub async fn read_xl_raw(&mut self) -> Result<(i16, i16, i16), TransportType::Error> {

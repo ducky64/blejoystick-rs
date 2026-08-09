@@ -34,7 +34,7 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
 
     info!("IMU: initialized");
     loop {
-        Timer::after_millis(1000).await;
+        Timer::after_millis(500).await;
         let new_data = match imu.new_data().await {
             Ok(new_data) => new_data,
             Err(_) => {
