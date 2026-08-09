@@ -228,9 +228,9 @@ struct StatusRegStruct {
 
 #[derive(Debug, defmt::Format)] // TODO feature gate
 pub struct NewDataAvailable {
-    temp: bool,
-    gyro: bool,
-    accelerometer: bool,
+    pub temp: bool,
+    pub gyro: bool,
+    pub accelerometer: bool,
 }
 
 pub struct Lsm6ds3tr<TransportType>
