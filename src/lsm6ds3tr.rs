@@ -1,5 +1,5 @@
 use bilge::prelude::*;
-use embedded_hal_async::i2c::{I2c, Operation};
+use embedded_hal_async::i2c::I2c;
 
 // TODO separate out into own repo
 
@@ -85,12 +85,13 @@ pub enum FsXl {
 }
 
 impl FsXl {
-    pub fn full_scale_g(&self) -> u8 {
+    pub fn sensitivity_mg_lsb(&self) -> f32 {
+        // direct datasheet values
         match self {
-            FsXl::G2 => 2,
-            FsXl::G4 => 4,
-            FsXl::G8 => 8,
-            FsXl::G16 => 16,
+            FsXl::G2 => 0.061,
+            FsXl::G4 => 0.122,
+            FsXl::G8 => 0.244,
+            FsXl::G16 => 0.488,
         }
     }
 }
@@ -142,14 +143,15 @@ pub enum FsG {
 }
 
 impl FsG {
-    pub fn full_scale_dps(&self) -> u16 {
+    pub fn sensitivity_mdps_lsb(&self) -> f32 {
+        // direct datasheet values
         match self {
-            FsG::Dps125 => 125,
-            FsG::Dps245 => 245,
-            FsG::Dps500 => 500,
-            FsG::Dps1000 => 1000,
-            FsG::Dps2000 => 2000,
-            FsG::Reserved => 0, // should not happen
+            FsG::Dps125 => 4.375,
+            FsG::Dps245 => 8.75,
+            FsG::Dps500 => 17.50,
+            FsG::Dps1000 => 35.0,
+            FsG::Dps2000 => 70.0,
+            FsG::Reserved => 0.0, // should not happen
         }
     }
 }
@@ -224,7 +226,7 @@ where
     }
 }
 
-#[derive(Debug, defmt::Format)] // TODO feature gate
+#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)] // TODO feature gate
 pub enum NormalizationError<TransportError> {
     Transport(TransportError),
     NotConfigured,
@@ -316,7 +318,7 @@ where
         Ok(temp_c)
     }
 
-    /// Reads the accelerometer, returning the raw u16 triple
+    /// Reads the accelerometer, returning the raw i16 triple
     pub async fn read_xl_raw(&mut self) -> Result<(i16, i16, i16), TransportType::Error> {
         let mut buffer = [0u8; 6];
         self.transport
@@ -328,12 +330,12 @@ where
         Ok((x, y, z))
     }
 
-    /// Reads the accelerometer, returning the normalized f32 triple in units of g
+    /// Reads the accelerometer, returning the f32 triple normalized in units of g
     pub async fn read_xl_g(
         &mut self,
     ) -> Result<(f32, f32, f32), NormalizationError<TransportType::Error>> {
         let scale = if let Some((_, fs)) = self.xl_config {
-            fs.full_scale_g() as f32 / 32768.0 // 16-bit signed
+            fs.sensitivity_mg_lsb() / 1000.0
         } else {
             return Err(NormalizationError::NotConfigured);
         };
@@ -346,7 +348,7 @@ where
         ))
     }
 
-    /// Reads the gyroscope, returning the raw u16 triple
+    /// Reads the gyroscope, returning the raw i16 triple
     pub async fn read_g_raw(&mut self) -> Result<(i16, i16, i16), TransportType::Error> {
         let mut buffer = [0u8; 6];
         self.transport
@@ -356,5 +358,22 @@ where
         let y = i16::from_le_bytes([buffer[2], buffer[3]]);
         let z = i16::from_le_bytes([buffer[4], buffer[5]]);
         Ok((x, y, z))
+    }
+
+    pub async fn read_g_dps(
+        &mut self,
+    ) -> Result<(f32, f32, f32), NormalizationError<TransportType::Error>> {
+        let scale = if let Some((_, fs)) = self.g_config {
+            fs.sensitivity_mdps_lsb() / 1000.0
+        } else {
+            return Err(NormalizationError::NotConfigured);
+        };
+
+        let (x_raw, y_raw, z_raw) = self.read_g_raw().await?;
+        Ok((
+            x_raw as f32 * scale,
+            y_raw as f32 * scale,
+            z_raw as f32 * scale,
+        ))
     }
 }

@@ -20,6 +20,9 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
         dev.config_xl(lsm6ds3tr::OdrXl::Hz104, lsm6ds3tr::FsXl::G4)
             .await
             .map_err(|_| ())?;
+        dev.config_g(lsm6ds3tr::OdrG::Hz104, lsm6ds3tr::FsG::Dps500)
+            .await
+            .map_err(|_| ())?;
         Ok::<_, ()>(dev)
     }
     .await
@@ -34,30 +37,31 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
     info!("IMU: initialized");
     loop {
         Timer::after_millis(500).await;
-        let new_data = match imu.new_data().await {
-            Ok(new_data) => new_data,
-            Err(_) => {
-                error!("IMU: failed to read status");
-                continue;
-            }
-        };
-        let temp_raw = match imu.read_temp_celsius().await {
-            Ok(data) => data,
-            Err(_) => {
-                error!("IMU: failed to read temperature");
-                continue;
-            }
-        };
-        let (x, y, z) = match imu.read_xl_g().await {
-            Ok(data) => data,
-            Err(_) => {
-                error!("IMU: failed to read accelerometer");
-                continue;
-            }
-        };
-        info!(
-            "IMU: nd {}, accel temp={}, x={} y={} z={}",
-            new_data, temp_raw, x, y, z
-        );
+        async {
+            let new_data = imu
+                .new_data()
+                .await
+                .inspect_err(|e| error!("IMU: failed to read status: {:?}", e))
+                .map_err(|_| ())?;
+
+            let (x, y, z) = imu
+                .read_xl_g()
+                .await
+                .inspect_err(|e| error!("IMU: failed to read status: {:?}", e))
+                .map_err(|_| ())?;
+            let (p, r, y) = imu
+                .read_g_dps()
+                .await
+                .inspect_err(|e| error!("IMU: failed to read status: {:?}", e))
+                .map_err(|_| ())?;
+
+            info!(
+                "IMU: nd {}, accel x={} y={} z={}, p={}, r={}, y={}",
+                new_data, x, y, z, p, r, y
+            );
+            Ok::<(), ()>(())
+        }
+        .await
+        .ok();
     }
 }
