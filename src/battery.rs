@@ -71,7 +71,7 @@ pub(crate) async fn battery_task(
         let meas = ina.next_measurement().await.unwrap();
         if let Some(meas) = meas {
             let soc = interpolate_1d(&LIPO_V_SOC, meas.bus_voltage.voltage_mv()) as u8;
-            info!(
+            debug!(
                 "INA219: v={}, i={}, soc={}",
                 meas.bus_voltage, meas.current, soc
             );
