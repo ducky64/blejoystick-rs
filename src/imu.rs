@@ -13,14 +13,13 @@ use crate::prelude::*;
 pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) {
     let mut imu = match async {
         let mut dev = Lsm6ds3tr::new(I2cDevice::new(&i2c_bus));
+        if !dev.check().await.map_err(|_| ())? {
+            error!("IMU ID check failed"); // TODO should be fatal
+        }
+        dev.reset().await.map_err(|_| ())?;
         dev.config_xl(lsm6ds3tr::OdrXl::Hz104, lsm6ds3tr::FsXl::G4)
             .await
             .map_err(|_| ())?;
-        // let id = dev.read_whoami().await.map_err(|_| ())?;
-        // info!("IMU: got id {}", id);
-        if !dev.check().await.map_err(|_| ())? {
-            warn!("IMU check failed"); // TODO should be fatal
-        }
         Ok::<_, ()>(dev)
     }
     .await
@@ -42,14 +41,14 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
                 continue;
             }
         };
-        let temp_raw = match imu.read_temp_raw().await {
+        let temp_raw = match imu.read_temp_celsius().await {
             Ok(data) => data,
             Err(_) => {
                 error!("IMU: failed to read temperature");
                 continue;
             }
         };
-        let (x, y, z) = match imu.read_xl_raw().await {
+        let (x, y, z) = match imu.read_xl_g().await {
             Ok(data) => data,
             Err(_) => {
                 error!("IMU: failed to read accelerometer");
