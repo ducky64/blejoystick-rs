@@ -34,7 +34,6 @@ mod ble_peripheral;
 mod bus;
 mod imu;
 mod joystick;
-mod lsm6ds3tr;
 mod prelude;
 mod util;
 use crate::battery::battery_task;

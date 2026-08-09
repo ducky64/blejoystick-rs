@@ -135,7 +135,6 @@ checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 name = "blejoystick-rs"
 version = "0.1.0"
 dependencies = [
- "bilge",
  "bt-hci",
  "cortex-m",
  "cortex-m-rt",
@@ -151,6 +150,8 @@ dependencies = [
  "fixed",
  "heapless 0.9.2",
  "ina219",
+ "lsm6ds3trc",
+ "micromath",
  "nrf-mpsl",
  "nrf-sdc",
  "panic-probe",
@@ -1136,6 +1137,15 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "lsm6ds3trc"
+version = "0.1.0"
+dependencies = [
+ "bilge",
+ "defmt 1.0.1",
+ "embedded-hal-async",
 ]
 
 [[package]]

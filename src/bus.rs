@@ -18,6 +18,14 @@ pub struct JoystickState {
     pub btn: bool,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct ImuUpdate {
+    pub dx: I1F15,
+    pub dy: I1F15,
+    pub trig: I1F15,
+    pub btn: bool,
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Format, FromRepr)]
 #[repr(u8)]
 pub enum StorageKey {

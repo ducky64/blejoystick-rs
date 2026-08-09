@@ -6,21 +6,22 @@ use embassy_time::Timer;
 type I2cBus = Mutex<CriticalSectionRawMutex, Twim<'static>>;
 
 use crate::bus::GlobalBus;
-use crate::lsm6ds3tr::{self, Lsm6ds3tr};
 use crate::prelude::*;
+
+use lsm6ds3trc::{self, Lsm6ds3tr};
 
 #[embassy_executor::task]
 pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) {
     let mut imu = match async {
-        let mut dev = Lsm6ds3tr::new(I2cDevice::new(&i2c_bus));
+        let mut dev = Lsm6ds3tr::new_i2c(I2cDevice::new(&i2c_bus));
         if !dev.check().await.map_err(|_| ())? {
             error!("IMU ID check failed"); // TODO should be fatal
         }
         dev.reset().await.map_err(|_| ())?;
-        dev.config_xl(lsm6ds3tr::OdrXl::new_at_least(5), lsm6ds3tr::FsXl::G4)
+        dev.config_xl(lsm6ds3trc::OdrXl::new_at_least(5), lsm6ds3trc::FsXl::G4)
             .await
             .map_err(|_| ())?;
-        dev.config_g(lsm6ds3tr::OdrG::new_at_least(100), lsm6ds3tr::FsG::Dps500)
+        dev.config_g(lsm6ds3trc::OdrG::new_at_least(100), lsm6ds3trc::FsG::Dps500)
             .await
             .map_err(|_| ())?;
         Ok::<_, ()>(dev)

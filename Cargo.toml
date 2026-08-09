@@ -80,9 +80,10 @@ usbd-hid = "0.10.1"
 
 ina219 = { version = "0.2", features = ["defmt"] }
 qmc5883p = "1.0"
+lsm6ds3trc = { path = "../lsm6ds3tr-rs", features = ["defmt"] }
 
-# for LSM6DS3 driver
-bilge = "0.3"
+# application
+micromath = "2.1"
 
 [profile.dev]
 # Rust debug is too slow.
