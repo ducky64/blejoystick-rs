@@ -54,20 +54,19 @@ pub(crate) async fn joystick_task(
     loop {
         let mut buf = [0; 3];
         stick_gate.set_low();
-        trig_gate.set_low();
         Timer::after_millis(3).await;
-
+        trig_gate.set_low(); // A1304 has a shorter power on time
+        Timer::after_micros(100).await;
         adc.sample(&mut buf).await;
-
-        stick_gate.set_high();
         trig_gate.set_high();
+        stick_gate.set_high();
 
         let x_adc = adc12_to_u0f16(buf[0]);
         let y_adc = adc12_to_u0f16(buf[1]);
-        let trig_adc = adc12_to_u0f16(buf[2]);
-
         let x_linear = scale_bipolar(x_adc, CENTER_X, FULLSCALE_XY, DEADZONE_XY);
         let y_linear = scale_bipolar(y_adc, CENTER_Y, FULLSCALE_XY, DEADZONE_XY);
+
+        let trig_adc = adc12_to_u0f16(buf[2]);
         let trig_linear = trig_adc
             .saturating_sub(U0F16::lit("0.55"))
             .saturating_div(U0F16::lit("0.2"));

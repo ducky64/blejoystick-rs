@@ -182,8 +182,8 @@ async fn main(spawner: Spawner) {
 async fn blinky(mut led: Output<'static>) {
     loop {
         led.set_high();
-        Timer::after(Duration::from_millis(25)).await;
+        Timer::after(Duration::from_millis(5)).await;
         led.set_low();
-        Timer::after(Duration::from_millis(225)).await;
+        Timer::after(Duration::from_millis(995)).await;
     }
 }
