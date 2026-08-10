@@ -9,6 +9,9 @@ use crate::bus::GlobalBus;
 use crate::prelude::*;
 
 use lsm6ds3trc::{self, Lsm6ds3tr};
+use qmc5883p::{
+    Mode, OutputDataRate, OverSampleRate, OverSampleRatio1, Qmc5883PConfig, Qmc5883p, Range,
+};
 
 #[embassy_executor::task]
 pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) {
@@ -31,6 +34,26 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
         Ok(dev) => dev,
         Err(_) => {
             error!("IMU: failed to initialize");
+            return;
+        }
+    };
+
+    let mut mag = match async {
+        let config = Qmc5883PConfig::default()
+            .with_mode(Mode::Continuous)
+            .with_odr(OutputDataRate::Hz10)
+            .with_range(Range::Gauss8)
+            .with_osr1(OverSampleRatio1::Ratio4)
+            .with_osr2(OverSampleRate::Rate4);
+        let mut sensor = Qmc5883p::new(I2cDevice::new(&i2c_bus));
+        sensor.init(config).await.unwrap();
+        Ok::<_, ()>(sensor)
+    }
+    .await
+    {
+        Ok(dev) => dev,
+        Err(_) => {
+            error!("Magnetometer: failed to initialize");
             return;
         }
     };
@@ -61,6 +84,28 @@ pub(crate) async fn imu_task(bus: &'static GlobalBus, i2c_bus: &'static I2cBus) 
                     .map_err(|_| ())?;
                 debug!("IMU: p={}, r={}, y={}", pitch, roll, yaw);
             }
+
+            Ok::<(), ()>(())
+        }
+        .await
+        .ok();
+
+        async {
+            // Read magnetic field data
+            let [x, y, z] = mag
+                .read_x_y_z()
+                .await
+                .inspect_err(|e| error!("Mag: failed to read XYZ: {:?}", e))
+                .map_err(|_| ())?;
+            let magnitude = mag
+                .read_magnitude()
+                .await
+                .inspect_err(|e| error!("Mag: failed to read magnitude: {:?}", e))
+                .map_err(|_| ())?;
+            debug!(
+                "Magnetometer: x={}, y={}, z={}, magnitude={}",
+                x, y, z, magnitude
+            );
 
             Ok::<(), ()>(())
         }
