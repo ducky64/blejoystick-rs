@@ -110,7 +110,8 @@ async fn main(spawner: Spawner) {
     let bus = bus::init(flash);
 
     // Shared I2C bus
-    let twi_config = twim::Config::default();
+    let mut twi_config = twim::Config::default();
+    twi_config.frequency = twim::Frequency::K400;
     static RAM_BUFFER: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
     let twi = Twim::new(
         p.TWISPI0,
