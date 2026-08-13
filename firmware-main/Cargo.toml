@@ -80,7 +80,7 @@ usbd-hid = "0.10.1"
 
 ina219 = { version = "0.2", features = ["defmt"] }
 qmc5883p = { version = "1.0", features = ["defmt"] }
-lsm6ds3trc = { path = "../lsm6ds3tr-rs", features = ["defmt"] }
+lsm6ds3trc = { path = "../../lsm6ds3tr-rs", features = ["defmt"] }
 
 # application
 micromath = "2.1"
