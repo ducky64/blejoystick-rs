@@ -18,14 +18,19 @@
 /// i2c.sda=PC1, 11
 /// ]
 use ch32_hal as hal;
-use hal::gpio::{Level, Output};
-
 use defmt::{debug, error, info, warn};
 use defmt_rtt as _;
+use hal::gpio::{Level, Output};
+use hal::prelude::Hertz;
+use hal::spi::Spi;
+
+// use ws2812_spi::Ws2812;
+use smart_leds::SmartLedsWrite;
+use ws2812_spi::prerendered::Ws2812;
 
 use core::panic::PanicInfo;
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(_info: &PanicInfo) -> ! {
     // This blows up flash usage
     // This will print the panic message, file, and line number via defmt!
     // defmt::error!("{}", defmt::Display2Format(info));
@@ -47,38 +52,35 @@ async fn main(spawner: Spawner) -> ! {
     config.rcc = hal::rcc::Config::SYSCLK_FREQ_48MHZ_HSI;
     let p = hal::init(config);
 
-    // info!("CHIP signature => {}", hal::signature::chip_id().name());
-    // info!("Clocks {:?}", hal::rcc::clocks());
+    info!("Init");
 
-    // let mut led = Output::new(p.PC4, Level::Low, Default::default());
+    let mut spi_config = hal::spi::Config::default();
+    spi_config.frequency = Hertz::mhz(4);
+    let spi = Spi::new_txonly::<0>(p.SPI1, p.PC5, p.PC6, p.DMA1_CH3, spi_config);
+
+    use smart_leds::RGB8;
+
+    let mut colors = [RGB8 { r: 2, g: 0, b: 2 }; 11];
+    let mut npx_buf: [u8; 512] = [0; 512];
+    let mut npx = Ws2812::new(spi, &mut npx_buf);
+
+    let mut i = 0;
 
     loop {
-        Timer::after_millis(1000).await;
-        info!("tick");
+        if i % 2 == 0 {
+            colors[0] = RGB8 { r: 0, g: 2, b: 2 };
+            colors[2] = RGB8 { r: 0, g: 2, b: 2 };
+            colors[4] = RGB8 { r: 0, g: 2, b: 2 };
+            colors[9] = RGB8 { r: 0, g: 0, b: 0 };
+        } else {
+            colors[0] = RGB8 { r: 2, g: 2, b: 0 };
+            colors[2] = RGB8 { r: 2, g: 2, b: 0 };
+            colors[4] = RGB8 { r: 2, g: 2, b: 0 };
+            colors[9] = RGB8 { r: 0, g: 4, b: 0 };
+        }
+        npx.write(colors.into_iter()).unwrap();
+        // TODO wait on SmartLEDs or SPI instead of guess waiting
+        Timer::after_millis(250).await;
+        i = i + 1;
     }
 }
-
-// #[qingke_rt::entry]
-// fn main() -> ! {
-//     use hal::delay::Delay;
-
-//     let mut config = hal::Config::default();
-//     config.rcc = hal::rcc::Config::SYSCLK_FREQ_48MHZ_HSI;
-//     let p = hal::init(config);
-
-//     // info!("CHIP signature => {}", hal::signature::chip_id().name());
-
-//     let mut delay = Delay;
-
-//     let mut led1 = Output::new(p.PC0, Level::Low, Default::default());
-//     led1.toggle();
-//     let mut led2 = Output::new(p.PD0, Level::Low, Default::default());
-//     loop {
-//         led1.toggle();
-//         led2.toggle();
-
-//         delay.delay_ms(50);
-
-//         info!("loop {}", hal::pac::SYSTICK.cnt().read());
-//     }
-// }
