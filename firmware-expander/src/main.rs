@@ -18,11 +18,13 @@
 /// i2c.sda=PC1, 11
 /// ]
 use ch32_hal as hal;
-use defmt::{debug, error, info, warn};
-use defmt_rtt as _;
 use hal::gpio::{Level, Output};
 use hal::prelude::Hertz;
 use hal::spi::Spi;
+
+use defmt_rtt as _;
+mod prelude;
+use prelude::*;
 
 // use ws2812_spi::Ws2812;
 use smart_leds::SmartLedsWrite;
@@ -47,7 +49,7 @@ use embassy_time::Timer;
 // async fn blink(pin: Peri<'static, AnyPin>, interval_ms: u64) {}
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
-async fn main(spawner: Spawner) -> ! {
+async fn main(_spawner: Spawner) -> ! {
     let mut config = hal::Config::default();
     config.rcc = hal::rcc::Config::SYSCLK_FREQ_48MHZ_HSI;
     let p = hal::init(config);
@@ -55,13 +57,13 @@ async fn main(spawner: Spawner) -> ! {
     info!("Init");
 
     let mut spi_config = hal::spi::Config::default();
-    spi_config.frequency = Hertz::mhz(4);
+    spi_config.frequency = Hertz::khz(3200);
     let spi = Spi::new_txonly::<0>(p.SPI1, p.PC5, p.PC6, p.DMA1_CH3, spi_config);
 
     use smart_leds::RGB8;
 
     let mut colors = [RGB8 { r: 2, g: 0, b: 2 }; 11];
-    let mut npx_buf: [u8; 512] = [0; 512];
+    let mut npx_buf: [u8; 256] = [0; 256];
     let mut npx = Ws2812::new(spi, &mut npx_buf);
 
     let mut i = 0;
