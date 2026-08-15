@@ -64,8 +64,7 @@ async fn main(_spawner: Spawner) -> ! {
     use smart_leds::RGB8;
 
     let mut colors = [RGB8 { r: 2, g: 0, b: 2 }; 11];
-    let mut npx_buf: [u8; 256] = [0; 256];
-    let mut npx = Ws2812SpiCustom::new(spi, 0b1000, 0b1100, 4, 2, &mut npx_buf);
+    let mut npx = Ws2812SpiCustom::<u8, _, 11, 4>::new(spi, 0b100, 3, 0b1100, 4);
 
     let mut i = 0;
 
