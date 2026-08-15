@@ -117,6 +117,7 @@ dependencies = [
  "qingke-rt",
  "smart-leds",
  "smart-leds-trait",
+ "ws2812-async",
 ]
 
 [[package]]
@@ -1098,4 +1099,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "ws2812-async"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24e47e0e4aaf453c95a529eb9492d2e467ed24f043e510b987a88910bf4a16c0"
+dependencies = [
+ "embedded-hal-async",
+ "smart-leds-trait",
 ]
