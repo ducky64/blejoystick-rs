@@ -117,7 +117,6 @@ dependencies = [
  "qingke-rt",
  "smart-leds",
  "smart-leds-trait",
- "ws2812-spi",
 ]
 
 [[package]]
@@ -1099,14 +1098,4 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
-]
-
-[[package]]
-name = "ws2812-spi"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2fd98e2b649252eced2ec3aa8d5048e7d2ac294276b0567939bbf47741f9934"
-dependencies = [
- "embedded-hal 1.0.0",
- "smart-leds-trait",
 ]
