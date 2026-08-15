@@ -116,6 +116,7 @@ dependencies = [
  "qingke",
  "qingke-rt",
  "smart-leds",
+ "smart-leds-trait",
  "ws2812-spi",
 ]
 

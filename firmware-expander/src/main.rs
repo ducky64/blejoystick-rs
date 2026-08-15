@@ -25,6 +25,7 @@ use hal::spi::Spi;
 use defmt_rtt as _;
 mod prelude;
 use prelude::*;
+mod ws2812;
 
 // use ws2812_spi::Ws2812;
 use smart_leds::SmartLedsWrite;
@@ -57,8 +58,8 @@ async fn main(_spawner: Spawner) -> ! {
     info!("Init");
 
     let mut spi_config = hal::spi::Config::default();
-    spi_config.frequency = Hertz::khz(3200);
-    let spi = Spi::new_txonly::<0>(p.SPI1, p.PC5, p.PC6, p.DMA1_CH3, spi_config);
+    spi_config.frequency = Hertz::khz(3000);
+    let spi = Spi::new_txonly_nosck::<0>(p.SPI1, p.PC6, p.DMA1_CH3, spi_config);
 
     use smart_leds::RGB8;
 
@@ -70,15 +71,15 @@ async fn main(_spawner: Spawner) -> ! {
 
     loop {
         if i % 2 == 0 {
-            colors[0] = RGB8 { r: 0, g: 2, b: 2 };
-            colors[2] = RGB8 { r: 0, g: 2, b: 2 };
-            colors[4] = RGB8 { r: 0, g: 2, b: 2 };
+            colors[0] = RGB8 { r: 0, g: 3, b: 2 };
+            colors[2] = RGB8 { r: 0, g: 3, b: 2 };
+            colors[4] = RGB8 { r: 0, g: 3, b: 2 };
             colors[9] = RGB8 { r: 0, g: 0, b: 0 };
         } else {
-            colors[0] = RGB8 { r: 2, g: 2, b: 0 };
-            colors[2] = RGB8 { r: 2, g: 2, b: 0 };
-            colors[4] = RGB8 { r: 2, g: 2, b: 0 };
-            colors[9] = RGB8 { r: 0, g: 4, b: 0 };
+            colors[0] = RGB8 { r: 2, g: 3, b: 0 };
+            colors[2] = RGB8 { r: 2, g: 3, b: 0 };
+            colors[4] = RGB8 { r: 2, g: 3, b: 0 };
+            colors[9] = RGB8 { r: 0, g: 3, b: 0 };
         }
         npx.write(colors.into_iter()).unwrap();
         // TODO wait on SmartLEDs or SPI instead of guess waiting
