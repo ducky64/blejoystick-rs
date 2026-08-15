@@ -24,6 +24,7 @@
 use defmt_rtt as _;
 use panic_probe as _;
 
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::{ConstStaticCell, StaticCell};
@@ -36,9 +37,11 @@ mod imu;
 mod joystick;
 mod prelude;
 mod util;
+mod expander;
 use crate::battery::battery_task;
 use crate::imu::imu_task;
 use crate::joystick::joystick_task;
+use crate::expander::Expander;
 use crate::prelude::*;
 
 use embassy_executor::Spawner;
@@ -133,8 +136,12 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(unwrap!(imu_task(bus, i2c_bus)));
 
+    // let mut expander: Expander<I2cDevice<'static, CriticalSectionRawMutex, &I2cBus>> = Expander::new(I2cDevice::new(&i2c_bus));
+    // let shared_expander = Mutex::new(expander);
+
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
-    spawner.spawn(unwrap!(blinky(led)));
+    // spawner.spawn(unwrap!(blinky(led, shared_expander)));
+    spawner.spawn(unwrap!(blinky(led, i2c_bus)));
 
     let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
@@ -180,11 +187,22 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn blinky(mut led: Output<'static>) {
+// async fn blinky(mut led: Output<'static>, mut expander: Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, I2cBus>>>) {
+async fn blinky(mut led: Output<'static>, i2c_bus: &'static I2cBus) {
+    let mut expander = Expander::new(I2cDevice::new(&i2c_bus));
+
     loop {
         led.set_high();
+        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 7, b: 0 }).await.ok();
+        expander.update_rgb().await.ok();
         Timer::after(Duration::from_millis(5)).await;
         led.set_low();
+        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
+        expander.update_rgb().await.ok();
         Timer::after(Duration::from_millis(995)).await;
+
+        expander.read_btns().await.ok().map(|btns| {
+            info!("Buttons: {:08b}", btns);
+        });
     }
 }

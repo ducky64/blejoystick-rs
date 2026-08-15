@@ -76,11 +76,14 @@ embassy-time = { version = "0.5", features = ["defmt"] }
 # peripherals
 # embedded-hal = "1.0"
 embedded-hal-async = "1.0"
+
 usbd-hid = "0.10.1"
 
 ina219 = { version = "0.2", features = ["defmt"] }
 qmc5883p = { version = "1.0", features = ["defmt"] }
 lsm6ds3trc = { path = "../../lsm6ds3tr-rs", features = ["defmt"] }
+
+smart-leds = "0.4.0"
 
 # application
 micromath = "2.1"

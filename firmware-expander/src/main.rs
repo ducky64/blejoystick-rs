@@ -19,7 +19,7 @@
 /// ]
 use ch32_hal as hal;
 use hal::{bind_interrupts, peripherals};
-use hal::gpio::{Level, Output};
+use hal::gpio::{Input, Pull};
 use hal::i2c::slave::{I2cSlave, SlaveCommandKind, SlaveConfig};
 use hal::prelude::Hertz;
 use hal::spi::Spi;
@@ -56,6 +56,17 @@ use embassy_time::Timer;
 // #[embassy_executor::task(pool_size = 2)]
 // async fn blink(pin: Peri<'static, AnyPin>, interval_ms: u64) {}
 
+
+// TODO keep sync'd with main expander.rs
+#[derive(PartialEq, defmt::Format)]
+enum Opcode {
+    Resrved = 0x00,
+    ReadBtns = 0x01, 
+    WriteRgbIndex = 0x12,
+    UpdateRgbs = 0x19,
+}
+
+
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) -> ! {
     let mut config = hal::Config::default();
@@ -67,24 +78,35 @@ async fn main(_spawner: Spawner) -> ! {
     let mut i2c_config = SlaveConfig::default();
     i2c_config.addr = 0x42;
     let mut i2c = I2cSlave::new::<0>(p.I2C1, p.PC2, p.PC1, Irqs, i2c_config);
+    let mut last_read_opcode: Opcode = Opcode::Resrved;
 
     let mut spi_config = hal::spi::Config::default();
     spi_config.frequency = Hertz::khz(3000);
     let spi = Spi::new_txonly_nosck::<0>(p.SPI1, p.PC6, p.DMA1_CH3, spi_config);
 
+    let btns: [Input; 8] = [
+        Input::new(p.PD4, Pull::Up),
+        Input::new(p.PD5, Pull::Up),
+        Input::new(p.PD6, Pull::Up),
+        Input::new(p.PD0, Pull::Up),
+        Input::new(p.PC0, Pull::Up),
+        Input::new(p.PC3, Pull::Up),
+        Input::new(p.PC4, Pull::Up),
+        Input::new(p.PC5, Pull::Up),
+    ];
+
     let mut colors = [RGB8 { r: 0, g: 0, b: 0 }; 11];
     let mut ws: Ws2812<_, Grb, 11> = Ws2812::new(spi);
     // flash on start
     colors[0] = RGB8 { r: 0, g: 7, b: 0 };
-    ws.write(colors.into_iter()).await.unwrap();  // first write may contain garbage
     ws.write(colors.into_iter()).await.unwrap();
     Timer::after_millis(10).await;
     colors[0] = RGB8 { r: 0, g: 0, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();  // clear LEDs on start
 
-    let mut i = 0;
-
     loop {
+        let mut update_ws = false;
+
         let cmd = match i2c.listen().await {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -97,32 +119,68 @@ async fn main(_spawner: Spawner) -> ! {
             SlaveCommandKind::Write => {
                 let mut buf = [0u8; 8];
                 match i2c.respond_to_write(&mut buf).await {
-                    Ok(_) => i = i + 1,
-                    Err(e) => error!("write error: {:?}", e),
+                    Ok(1) => {
+                        match buf[0] {
+                            op if op == Opcode::UpdateRgbs as u8 => {
+                                update_ws = true;
+                                info!("i2c write: update leds");
+                            },
+                            op if op == Opcode::ReadBtns as u8 => {
+                                last_read_opcode = Opcode::ReadBtns;
+                            },
+                            op => {
+                                error!("i2c write: unknown len 1 opcode {}", op);
+                            }
+                        }
+                    },
+                    Ok(5) => {
+                        match buf[0] {
+                            op if op == Opcode::WriteRgbIndex as u8 => {
+                                let index = buf[1] as usize;
+                                if index < colors.len() {
+                                    colors[index] = RGB8 { r: buf[2], g: buf[3], b: buf[4] };
+                                } else {
+                                    error!("i2c write: index {} out of bounds", index);
+                                }
+                                info!("i2c write: write rgb index {}", index);
+                            },
+                            op => {
+                                error!("i2c write: unknown len 5 opcode {}", op);
+                            }
+                        }
+                    },
+                    Ok(n) => {
+                        error!("i2c write error: unknown len {}", n);
+                    }
+                    Err(e) => error!("i2c write error: {:?}", e),
                 }
             }
 
             SlaveCommandKind::Read => {
-                let mut buf = [0x42u8; 8];
                 match i2c.respond_to_read(&buf).await {
-                    Ok(status) => (),
-                    Err(e) => error!("read error: {:?}", e),
+                    Ok(status) if last_read_opcode == Opcode::ReadBtns => {
+                        let mut btns_state = 0u8;
+                        for (i, btn) in btns.iter().enumerate() {
+                            if btn.is_low() {
+                                btns_state |= 1 << i;
+                            }
+                        }
+                        info!("i2c write: read buttons, state {:08b}", btns_state);
+                        // respond with button state
+                        let _ = i2c.respond_to_read(&[btns_state]).await;
+
+                        info!("i2c read ok: {:?}", status)
+                    },
+                    Ok(status) => {
+                        error!("i2c read error: unexpected opcode {:?}, status {:?}", last_read_opcode, status);
+                    },
+                    Err(e) => error!("i2c read error: {:?}", e),
                 }
             }
         }
 
-        if i % 2 == 0 {
-            colors[0] = RGB8 { r: 0, g: 3, b: 2 };
-            colors[2] = RGB8 { r: 0, g: 3, b: 2 };
-            colors[4] = RGB8 { r: 0, g: 3, b: 2 };
-            colors[9] = RGB8 { r: 0, g: 0, b: 0 };
-        } else {
-            colors[0] = RGB8 { r: 2, g: 3, b: 0 };
-            colors[2] = RGB8 { r: 2, g: 3, b: 0 };
-            colors[4] = RGB8 { r: 2, g: 3, b: 0 };
-            colors[9] = RGB8 { r: 0, g: 3, b: 0 };
+        if update_ws {
+            ws.write(colors.into_iter()).await.unwrap();
         }
-        ws.write(colors.into_iter()).await.unwrap();
-        i = i + 1;
     }
 }
