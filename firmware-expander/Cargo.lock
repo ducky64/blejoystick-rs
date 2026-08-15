@@ -60,11 +60,12 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 [[package]]
 name = "ch32-hal"
 version = "0.1.0"
-source = "git+https://github.com/ch32-rs/ch32-hal.git#71a2985804962e248efc09e3bb4f21d4459b50e8"
+source = "git+https://github.com/korbin/ch32-hal.git?rev=14b425d8fc041abe5651ade1b675df3c05725e09#14b425d8fc041abe5651ade1b675df3c05725e09"
 dependencies = [
  "bitmaps",
  "ch32-metapac",
  "critical-section",
+ "defmt 0.3.100",
  "embassy-futures",
  "embassy-hal-internal 0.3.0",
  "embassy-net-driver",
@@ -104,7 +105,7 @@ name = "ch32v003-ioexpander"
 version = "0.1.0"
 dependencies = [
  "ch32-hal",
- "defmt",
+ "defmt 1.1.1",
  "defmt-rtt",
  "embassy-embedded-hal",
  "embassy-executor",
@@ -173,6 +174,15 @@ dependencies = [
 
 [[package]]
 name = "defmt"
+version = "0.3.100"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0963443817029b2024136fc4dd07a5107eb8f977eaf18fcd1fdeb11306b64ad"
+dependencies = [
+ "defmt 1.1.1",
+]
+
+[[package]]
+name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1"
@@ -209,7 +219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05144944c117db54127a8ac17a3c9a28d55e7047bfddb950bcd20b4a94c79b10"
 dependencies = [
  "critical-section",
- "defmt",
+ "defmt 1.1.1",
 ]
 
 [[package]]
