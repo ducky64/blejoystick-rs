@@ -25,8 +25,6 @@ use hal::spi::Spi;
 use defmt_rtt as _;
 mod prelude;
 use prelude::*;
-mod ws2812;
-use ws2812::Ws2812SpiCustom;
 use ws2812_async::{Grb, Ws2812};
 
 use smart_leds::SmartLedsWriteAsync;
@@ -64,8 +62,7 @@ async fn main(_spawner: Spawner) -> ! {
     use smart_leds::RGB8;
 
     let mut colors = [RGB8 { r: 2, g: 0, b: 2 }; 11];
-    // let mut ws: Ws2812<_, Grb, 11> = Ws2812::new(spi);
-    let mut ws = Ws2812SpiCustom::<u8, _, 11, 4>::new(spi, 0b100, 4, 0b1100, 4);
+    let mut ws: Ws2812<_, Grb, 11> = Ws2812::new(spi);
 
     let mut i = 0;
 
@@ -82,8 +79,7 @@ async fn main(_spawner: Spawner) -> ! {
             colors[9] = RGB8 { r: 0, g: 3, b: 0 };
         }
         ws.write(colors.into_iter()).await.unwrap();
-        // TODO wait on SmartLEDs or SPI instead of guess waiting
-        // Timer::after_millis(25).await;
+        Timer::after_millis(25).await;
         i = i + 1;
     }
 }
