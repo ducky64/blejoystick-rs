@@ -13,6 +13,7 @@ runner = "probe-rs run --chip ch32v003f4p6"
 
 [env]
 DEFMT_LOG="info"
+DEFMT_RTT_BUFFER_SIZE = "128"
 
 [unstable]
 build-std = ["core"]

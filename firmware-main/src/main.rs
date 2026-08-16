@@ -193,7 +193,7 @@ async fn blinky(mut led: Output<'static>, i2c_bus: &'static I2cBus) {
 
     loop {
         led.set_high();
-        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 7, b: 0 }).await.ok();
+        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
         expander.update_rgb().await.ok();
         Timer::after(Duration::from_millis(5)).await;
         led.set_low();
