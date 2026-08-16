@@ -188,16 +188,16 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 // async fn blinky(mut led: Output<'static>, mut expander: Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, I2cBus>>>) {
-async fn blinky(mut led: Output<'static>, i2c_bus: &'static I2cBus) {
+async fn blinky(mut _led: Output<'static>, i2c_bus: &'static I2cBus) {
     let mut expander = Expander::new(I2cDevice::new(&i2c_bus));
 
     let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
-        led.set_high();
+        // led.set_high();
         expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
         expander.update_rgb().await.ok();
         Timer::after(Duration::from_millis(5)).await;
-        led.set_low();
+        // led.set_low();
         expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
         expander.update_rgb().await.ok();
         
