@@ -15,6 +15,33 @@ impl NumBits for u16 { const BITS: u8 = 16; }
 impl NumBits for u32 { const BITS: u8 = 32; }
 impl NumBits for u64 { const BITS: u8 = 64; }
 
+pub trait TruncatedFrom<T> {
+    fn truncated_from(value: T) -> Self;
+}
+
+impl<T> TruncatedFrom<T> for T {
+    fn truncated_from(value: T) -> Self {
+        value
+    }
+}
+
+impl TruncatedFrom<u32> for u8 {
+    fn truncated_from(value: u32) -> u8 {
+        value as u8
+    }
+}
+
+impl TruncatedFrom<u16> for u8 {
+    fn truncated_from(value: u16) -> u8 {
+        value as u8
+    }
+}
+
+impl TruncatedFrom<u32> for u16 {
+    fn truncated_from(value: u32) -> u16 {
+        value as u16
+    }
+}
 
 pub trait Ws2812SpiLookupTable {
     const INDEX_BITS: u8;  // number of bits this table indexes by
@@ -32,21 +59,21 @@ pub trait Ws2812SpiLookupTable {
 /// zero_bits, one_bits do not need to divide cleanly into a Word
 ///   the SPI buffer generation will build Words across smartled bit boundaries
 pub struct OneBitWs2812LookupTable {
-    zero: u8,
+    zero: u16,
     zero_bits: u8,
-    one: u8,
+    one: u16,
     one_bits: u8
 }
 
 impl OneBitWs2812LookupTable {
-    pub fn new(zero: u8, zero_bits: u8, one: u8, one_bits: u8) -> Self {
+    pub fn new(zero: u16, zero_bits: u8, one: u16, one_bits: u8) -> Self {
         Self { zero, zero_bits, one, one_bits }
     }
 }
 
 impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
   const INDEX_BITS: u8 = 1;
-  type Output = u8;
+  type Output = u16;
 
   fn get(&self, value: u8) -> (Self::Output, u8) {
       if value & 0x01 == 0 {
@@ -71,13 +98,14 @@ pub struct Ws2812SpiCustom<Word, Lut, SPI, const N: usize, const WORDS_PER_COLOR
 impl <Word: Copy + 'static, Lut, SPI, const N: usize, const WORDS_PER_COLOR: usize> Ws2812SpiCustom<Word, Lut, SPI, N, WORDS_PER_COLOR> 
 where
     SPI: SpiBus<Word>,
-    Lut: Ws2812SpiLookupTable<Output = Word>,
-    Word: Copy + From<u8> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
+    Lut: Ws2812SpiLookupTable,
+    Lut::Output: Copy +  Shl<u8, Output = Lut::Output> + Shr<u8, Output = Lut::Output> + NumBits,
+    Word: Copy + Default + TruncatedFrom<Lut::Output> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
 {
     /// Creates a new instance given a SPI bus and lookup table defining how smartled bits are encoded into SPI bits.
     /// This requires the SPI driver to continuously transmit data, without inter-word gaps
     pub fn new(spi: SPI, lut: Lut) -> Self {
-        Self { spi, lut, buffer: [[[0.into(); WORDS_PER_COLOR]; 3]; N]}
+        Self { spi, lut, buffer: [[[Word::default(); WORDS_PER_COLOR]; 3]; N]}
     }
 
     fn flat_buffer(buffer: &mut [[[Word; WORDS_PER_COLOR]; 3]; N]) -> &mut [Word] {
@@ -93,7 +121,7 @@ where
         I: Into<RGB8>
     {
         let mut buffer_index = 0;  // of the current word being written
-        let mut word_buffer: Word = 0.into();  // accumulates SPI bits per word
+        let mut word_buffer: Word = Word::default();  // accumulates SPI bits per word
         let mut word_bits = 0;  // number of bits written into word_buffer
 
         for item in iterator {
@@ -107,7 +135,7 @@ where
                     // calculate the number of bits to shift the existing word.
                     // either the all the bits of this smartled bit or the remaining bits of the current word
                     let shift_bits = min(bit_bits, word_bits % Word::BITS);
-                    word_buffer = (word_buffer << shift_bits) | (bit_data >> (bit_bits - shift_bits));
+                    word_buffer = (word_buffer << shift_bits) | Word::truncated_from(bit_data >> (bit_bits - shift_bits));
 
                     // assume that at most one word can be written per smartled bit, since everything is typed Word
                     if word_bits >= Word::BITS {
@@ -115,7 +143,7 @@ where
                         buffer_index += 1;
                         // though all the bits are written to word_buffer, word_bits tracks bit counts
                         // so the extra MSbits will be shifted eventually
-                        word_buffer = bit_data;
+                        word_buffer = Word::truncated_from(bit_data);
                         word_bits -= Word::BITS;
                     }
                 }
@@ -136,8 +164,9 @@ impl <Word, Lut, SPI, const N: usize, const WORDS_PER_COLOR: usize> SmartLedsWri
 for Ws2812SpiCustom<Word, Lut, SPI, N, WORDS_PER_COLOR> 
 where
     SPI: SpiBus<Word>,
-    Lut: Ws2812SpiLookupTable<Output = Word>,
-    Word: Copy + From<u8> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
+    Lut: Ws2812SpiLookupTable,
+    Lut::Output: Copy +  Shl<u8, Output = Lut::Output> + Shr<u8, Output = Lut::Output> + NumBits,
+    Word: Copy + Default + TruncatedFrom<Lut::Output> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
 {
     type Error = SPI::Error;
     type Color = RGB8;
