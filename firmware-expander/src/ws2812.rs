@@ -92,16 +92,36 @@ pub struct MultiBitWs2812Lookup<T, const N: usize>
 }
 
 impl <T, const N: usize> MultiBitWs2812Lookup<T, N>
+where T: Copy + Default + Shl<u8, Output = T> + BitOr<T, Output = T>
 {
     const INDEX_MASK : u8 = (N as u8) - 1;
 
-    pub fn new(zero: u8, zero_bits: u8, one: u8, one_bits: u8) -> Self {
-        Self { [] }
+    pub fn new(zero: T, zero_bits: u8, one: T, one_bits: u8) -> Self {
+        let mut table: [T; N] = [T::default(); N];
+        let mut bits: [u8; N] = [0; N];
+
+        for entry in 0..N {
+            let mut value: T = T::default();
+            let mut bit_count: u8 = 0;
+            for bit in (0..Self::INDEX_BITS).rev() {
+                if entry & (1 << bit) == 0 {
+                    value = (value << zero_bits) | zero;
+                    bit_count += zero_bits;
+                } else {
+                    value = (value << one_bits) | one;
+                    bit_count += one_bits;
+                }
+            }
+            table[entry] = value;
+            bits[entry] = bit_count;
+        }
+
+        Self { table, bits }
     }
 }
 
 impl <T, const N: usize> Ws2812SpiLookupTable for MultiBitWs2812Lookup<T, N> 
-where T: Copy
+where T: Copy + Default + Shl<u8, Output = T> + BitOr<T, Output = T>
 {
   const INDEX_BITS: u8 = N.ilog2() as u8;
   type Output = T;
@@ -171,7 +191,12 @@ where
                   // spi_bits tracks the most significant valid bit in spi_data
                   while spi_bits > 0 {
                       let shift_bits = min(spi_bits, Word::BITS - word_bits);
-                      word_buffer = (word_buffer << shift_bits) | Word::truncated_from(spi_data >> (spi_bits - shift_bits));
+                      if shift_bits < Word::BITS {
+                          word_buffer = (word_buffer << shift_bits) | Word::truncated_from(spi_data >> (spi_bits - shift_bits));
+                      } else {
+                          word_buffer = Word::truncated_from(spi_data >> (spi_bits - shift_bits));
+                      }
+                      
                       word_bits += shift_bits;
                       spi_bits -= shift_bits;
 
