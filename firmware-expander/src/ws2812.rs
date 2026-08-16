@@ -72,7 +72,7 @@ impl OneBitWs2812LookupTable {
 }
 
 impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
-  const INDEX_BITS: u8 = 1;
+  const INDEX_BITS: u8 = 2;
   type Output = u16;
 
   fn get(&self, value: u8) -> (Self::Output, u8) {
@@ -120,6 +120,11 @@ where
         T: IntoIterator<Item = I>,
         I: Into<RGB8>
     {
+        const {
+            assert!(Lut::INDEX_BITS.is_power_of_two(), "Lut::INDEX_BITS must be a power of two");
+            assert!(Lut::INDEX_BITS <= 8, "Lut::INDEX_BITS must be <= 8 (RGB8 component)");
+        };
+        
         let mut buffer_index = 0;  // of the current word being written
         let mut word_buffer: Word = Word::default();  // accumulates SPI bits per word
         let mut word_bits = 0;  // number of bits written into word_buffer
