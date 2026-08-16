@@ -169,17 +169,19 @@ async fn main(_spawner: Spawner) -> ! {
                 match last_read_opcode {
                     Opcode::ReadBtns => {
                         let mut btns_state = 0u8;
-                        for (i, btn) in btns.iter().enumerate() {
+                        let btn_state_highbit = 1u8 << (btns.len() - 1);
+                        for btn in btns.iter() {
+                            btns_state >>= 1;
                             if btn.is_low() {
-                                btns_state |= 1 << i;
+                                btns_state |= btn_state_highbit;
                             }
                         }
-                        info!("i2c read: read buttons, state {:08b}", btns_state);
                         i2c.respond_to_read(&[btns_state]).await.inspect_err(|e| error!("i2c read error: {:?}", e)).ok();
+                        info!("i2c read: read buttons, state {:08b}", btns_state);
                     },
                     _ => {
-                        error!("i2c read: unknown last opcode {:?}", last_read_opcode);
                         i2c.respond_to_read(&[]).await.inspect_err(|e| error!("i2c read error: {:?}", e)).ok();
+                        error!("i2c read: unknown last opcode {:?}", last_read_opcode);
                     }
                 }
             }

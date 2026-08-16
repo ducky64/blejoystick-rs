@@ -41,12 +41,12 @@ ws2812-async = "0.4.0"
 [profile.release]
 strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
 lto = true
-opt-level = "z" # Optimize for size.
+opt-level = 3
 
 [profile.dev]
 strip = false
 lto = true
-opt-level = "z"
+opt-level = 3
 
 [patch.crates-io]
 ch32-hal = { git = "https://github.com/korbin/ch32-hal.git", rev = "14b425d8fc041abe5651ade1b675df3c05725e09" }  # i2c peripheral support
