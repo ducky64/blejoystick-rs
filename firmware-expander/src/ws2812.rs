@@ -59,21 +59,21 @@ pub trait Ws2812SpiLookupTable {
 /// zero_bits, one_bits do not need to divide cleanly into a Word
 ///   the SPI buffer generation will build Words across smartled bit boundaries
 pub struct OneBitWs2812LookupTable {
-    zero: u16,
+    zero: u8,
     zero_bits: u8,
-    one: u16,
+    one: u8,
     one_bits: u8
 }
 
 impl OneBitWs2812LookupTable {
-    pub fn new(zero: u16, zero_bits: u8, one: u16, one_bits: u8) -> Self {
+    pub fn new(zero: u8, zero_bits: u8, one: u8, one_bits: u8) -> Self {
         Self { zero, zero_bits, one, one_bits }
     }
 }
 
 impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
   const INDEX_BITS: u8 = 1;
-  type Output = u16;
+  type Output = u8;
 
   fn get(&self, value: u8) -> (Self::Output, u8) {
       if value & 0x01 == 0 {
