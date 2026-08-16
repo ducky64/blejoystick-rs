@@ -72,7 +72,7 @@ impl OneBitWs2812LookupTable {
 }
 
 impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
-  const INDEX_BITS: u8 = 2;
+  const INDEX_BITS: u8 = 1;
   type Output = u16;
 
   fn get(&self, value: u8) -> (Self::Output, u8) {
@@ -121,36 +121,40 @@ where
         I: Into<RGB8>
     {
         const {
-            assert!(Lut::INDEX_BITS.is_power_of_two(), "Lut::INDEX_BITS must be a power of two");
+            assert!(8 % Lut::INDEX_BITS == 0, "Lut::INDEX_BITS must divide from 8 (RGB8 component)");
             assert!(Lut::INDEX_BITS <= 8, "Lut::INDEX_BITS must be <= 8 (RGB8 component)");
+            assert!(Lut::Output::BITS >= Word::BITS, "Lut::Output must larger or equal to than Word");
         };
         
         let mut buffer_index = 0;  // of the current word being written
-        let mut word_buffer: Word = Word::default();  // accumulates SPI bits per word
+        let mut word_buffer: Word = Word::default();  // accumulates SPI bits per word, LSbit aligned
         let mut word_bits = 0;  // number of bits written into word_buffer
 
         for item in iterator {
             let item = item.into();
             for color_byte in [item.g, item.r, item.b] {
-                for bit in (0..8).rev() {
-                    let bit_value = (color_byte >> bit) & 0x01;
-                    let (bit_data, bit_bits) = lut.get(bit_value);
+                let mut written_bits: u8 = 0;
+                while written_bits < 8 {
+                  let index_mask = (1 << Lut::INDEX_BITS) - 1;
+                  let lut_index = (color_byte >> (8 - written_bits - Lut::INDEX_BITS)) & index_mask;
+                  let (spi_data, mut spi_bits) = lut.get(lut_index);
+                  written_bits += Lut::INDEX_BITS;
 
-                    word_bits += bit_bits;
-                    // calculate the number of bits to shift the existing word.
-                    // either the all the bits of this smartled bit or the remaining bits of the current word
-                    let shift_bits = min(bit_bits, word_bits % Word::BITS);
-                    word_buffer = (word_buffer << shift_bits) | Word::truncated_from(bit_data >> (bit_bits - shift_bits));
+                  // spi_data is shifted into word_buffer MSbit first
+                  // spi_bits tracks the most significant valid bit in spi_data
+                  while spi_bits > 0 {
+                      let shift_bits = min(spi_bits, Word::BITS - word_bits);
+                      word_buffer = (word_buffer << shift_bits) | Word::truncated_from(spi_data >> (spi_bits - shift_bits));
+                      word_bits += shift_bits;
+                      spi_bits -= shift_bits;
 
-                    // assume that at most one word can be written per smartled bit, since everything is typed Word
-                    if word_bits >= Word::BITS {
-                        buffer[buffer_index] = word_buffer;
-                        buffer_index += 1;
-                        // though all the bits are written to word_buffer, word_bits tracks bit counts
-                        // so the extra MSbits will be shifted eventually
-                        word_buffer = Word::truncated_from(bit_data);
-                        word_bits -= Word::BITS;
-                    }
+                      if word_bits >= Word::BITS {
+                          buffer[buffer_index] = word_buffer;
+                          buffer_index += 1;
+                          word_buffer = Word::default();
+                          word_bits = 0;
+                      }
+                  }
                 }
             }
         }

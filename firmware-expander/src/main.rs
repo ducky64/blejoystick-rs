@@ -114,7 +114,7 @@ async fn main(_spawner: Spawner) -> ! {
     ];
 
     let mut colors = [RGB8 { r: 0, g: 0, b: 0 }; 11];
-    let ws_lut = ws2812::OneBitWs2812LookupTable::new(0b100, 4, 0b1100, 4);
+    let ws_lut = ws2812::OneBitWs2812LookupTable::new(0b100, 3, 0b1100, 4);
     let mut ws = Ws2812SpiCustom::<u8, _, _, 11, 4>::new(spi, ws_lut);
     // flash on start
     colors[0] = RGB8 { r: 0, g: 7, b: 0 };
