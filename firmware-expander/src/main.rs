@@ -63,8 +63,7 @@ use embassy_time::Timer;
 #[derive(PartialEq, TryFromPrimitive, defmt::Format)]
 #[repr(u8)]
 enum Opcode {
-    Resrved = 0x00,
-    ReadBtns = 0x01, 
+    ReadBtns = 0x01,
     WriteRgbIndex = 0x12,
     UpdateRgbs = 0x19,
 }
@@ -81,7 +80,7 @@ async fn main(_spawner: Spawner) -> ! {
     let mut i2c_config = SlaveConfig::default();
     i2c_config.addr = 0x42;
     let mut i2c = I2cSlave::new::<0>(p.I2C1, p.PC2, p.PC1, Irqs, i2c_config);
-    let mut last_read_opcode: Opcode = Opcode::Resrved;
+    let mut last_read_opcode: Opcode = Opcode::ReadBtns;
 
     let mut spi_config = hal::spi::Config::default();
     spi_config.frequency = Hertz::khz(3000);

@@ -2,7 +2,6 @@ use embedded_hal_async::i2c::I2c;
 use smart_leds::RGB8;
 
 enum Opcode {
-    Resrved = 0x00,
     ReadBtns = 0x01, 
     WriteRgbIndex = 0x12,
     UpdateRgbs = 0x19,

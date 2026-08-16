@@ -51,7 +51,7 @@ use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_nrf::twim::{self, Twim};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, Ticker};
 
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;
@@ -191,6 +191,7 @@ async fn main(spawner: Spawner) {
 async fn blinky(mut led: Output<'static>, i2c_bus: &'static I2cBus) {
     let mut expander = Expander::new(I2cDevice::new(&i2c_bus));
 
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
         led.set_high();
         expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
@@ -199,10 +200,11 @@ async fn blinky(mut led: Output<'static>, i2c_bus: &'static I2cBus) {
         led.set_low();
         expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
         expander.update_rgb().await.ok();
-        Timer::after(Duration::from_millis(995)).await;
-
+        
         expander.read_btns().await.ok().map(|btns| {
             info!("Buttons: {:08b}", btns);
         });
+
+        ticker.next().await;
     }
 }
