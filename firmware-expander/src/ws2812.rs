@@ -16,33 +16,68 @@ impl NumBits for u32 { const BITS: u8 = 32; }
 impl NumBits for u64 { const BITS: u8 = 64; }
 
 
+pub trait Ws2812SpiLookupTable {
+    const INDEX_BITS: u8;  // number of bits this table indexes by
+    type Output;  // return type
+
+    /// Given BITS of smartled bits, return the corresponding SPI word and number of SPI bits
+    fn get(&self, value: u8) -> (Self::Output, u8);
+}
+
+
+/// Define a simple lookup table indexed one bit at a time.
+/// zero: SPI data for a smartled zero bit, occupying the LSbits
+/// zero_bits: number of SPI bits of the zero value
+/// one, one_bits: same for a smartled one bit
+/// zero_bits, one_bits do not need to divide cleanly into a Word
+///   the SPI buffer generation will build Words across smartled bit boundaries
+pub struct OneBitWs2812LookupTable {
+    zero: u8,
+    zero_bits: u8,
+    one: u8,
+    one_bits: u8
+}
+
+impl OneBitWs2812LookupTable {
+    pub fn new(zero: u8, zero_bits: u8, one: u8, one_bits: u8) -> Self {
+        Self { zero, zero_bits, one, one_bits }
+    }
+}
+
+impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
+  const INDEX_BITS: u8 = 1;
+  type Output = u8;
+
+  fn get(&self, value: u8) -> (Self::Output, u8) {
+      if value & 0x01 == 0 {
+          (self.zero, self.zero_bits)
+      } else {
+          (self.one, self.one_bits)
+      }
+  }
+}
+
+
 /// WS2812 LED driver with customizable SPI word size and bit encoding
 /// N is the maximum number of LEDs in the chain, for buffer sizing
 /// WORDS_PER_COLOR is the maximum number of SPI words used to encode a single color of LED data
 ///   This encoding is needed for internal array sizing without generic const exprs
-pub struct Ws2812SpiCustom<Word, SPI, const N: usize, const WORDS_PER_COLOR: usize> {
+pub struct Ws2812SpiCustom<Word, Lut, SPI, const N: usize, const WORDS_PER_COLOR: usize> {
     spi: SPI,
-    zero: Word,
-    zero_bits: u8,
-    one: Word,
-    one_bits: u8,
+    lut: Lut,
     buffer: [[[Word; WORDS_PER_COLOR]; 3]; N],
 }
 
-impl <Word: Copy + 'static, SPI, const N: usize, const WORDS_PER_COLOR: usize> Ws2812SpiCustom<Word, SPI, N, WORDS_PER_COLOR> 
+impl <Word: Copy + 'static, Lut, SPI, const N: usize, const WORDS_PER_COLOR: usize> Ws2812SpiCustom<Word, Lut, SPI, N, WORDS_PER_COLOR> 
 where
     SPI: SpiBus<Word>,
+    Lut: Ws2812SpiLookupTable<Output = Word>,
     Word: Copy + From<u8> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
 {
-    /// Creates a new instance given a SPI bus.
-    /// zero: SPI data for a smartled zero bit, occupying the LSbits
-    /// zero_bits: number of SPI bits of the zero value
-    /// one, one_bits: same for a smartled one bit
-    /// zero_bits, one_bits do not need to divide cleanly into a Word
-    ///   the SPI buffer generation will build Words across smartled bit boundaries
-    /// this requires the SPI driver to continuously transmit data, without inter-word gaps
-    pub fn new(spi: SPI, zero: Word, zero_bits: u8, one: Word, one_bits: u8) -> Self {
-        Self { spi, zero, zero_bits, one, one_bits, buffer: [[[0.into(); WORDS_PER_COLOR]; 3]; N]}
+    /// Creates a new instance given a SPI bus and lookup table defining how smartled bits are encoded into SPI bits.
+    /// This requires the SPI driver to continuously transmit data, without inter-word gaps
+    pub fn new(spi: SPI, lut: Lut) -> Self {
+        Self { spi, lut, buffer: [[[0.into(); WORDS_PER_COLOR]; 3]; N]}
     }
 
     fn flat_buffer(buffer: &mut [[[Word; WORDS_PER_COLOR]; 3]; N]) -> &mut [Word] {
@@ -52,7 +87,7 @@ where
     }
 
     /// Write the colors to SPI bits in a buffer for transmission, returning the number of words.
-    fn write_buffer<T, I>(zero: Word, zero_bits: u8, one: Word, one_bits: u8, iterator: T, buffer: &mut [Word]) -> usize 
+    fn write_buffer<T, I>(lut: &Lut, iterator: T, buffer: &mut [Word]) -> usize 
     where
         T: IntoIterator<Item = I>,
         I: Into<RGB8>
@@ -66,7 +101,7 @@ where
             for color_byte in [item.g, item.r, item.b] {
                 for bit in (0..8).rev() {
                     let bit_value = (color_byte >> bit) & 0x01;
-                    let (bit_data, bit_bits) = if bit_value == 0 { (zero, zero_bits) } else { (one, one_bits) };
+                    let (bit_data, bit_bits) = lut.get(bit_value);
 
                     word_bits += bit_bits;
                     // calculate the number of bits to shift the existing word.
@@ -97,10 +132,11 @@ where
     }
 }
 
-impl <Word, SPI, const N: usize, const WORDS_PER_COLOR: usize> SmartLedsWriteAsync
-for Ws2812SpiCustom<Word, SPI, N, WORDS_PER_COLOR> 
+impl <Word, Lut, SPI, const N: usize, const WORDS_PER_COLOR: usize> SmartLedsWriteAsync
+for Ws2812SpiCustom<Word, Lut, SPI, N, WORDS_PER_COLOR> 
 where
     SPI: SpiBus<Word>,
+    Lut: Ws2812SpiLookupTable<Output = Word>,
     Word: Copy + From<u8> + Shl<u8, Output = Word> + Shr<u8, Output = Word> + BitOr<Word, Output = Word> + NumBits + 'static,
 {
     type Error = SPI::Error;
@@ -112,7 +148,7 @@ where
         I: Into<Self::Color>
     {
         let buffer = Self::flat_buffer(&mut self.buffer);
-        let buffer_size = Self::write_buffer(self.zero, self.zero_bits, self.one, self.one_bits, iterator, buffer);
+        let buffer_size = Self::write_buffer(&self.lut, iterator, buffer);
         self.spi.write(&buffer[0..buffer_size]).await
     }
 }
