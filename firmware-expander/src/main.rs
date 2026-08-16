@@ -28,10 +28,9 @@ use hal::pac::rcc::vals::{Hpre as AHBPrescaler, Pllsrc as PllSource, Ppre as APB
 use defmt_rtt as _;
 mod prelude;
 use prelude::*;
-mod ws2812;
-use ws2812::Ws2812SpiCustom;
 
 use smart_leds::{RGB8, SmartLedsWriteAsync};
+use smartleds_spi_lut::{SmartLedsSpi, SmartLedsSpiLut};
 
 use num_enum::TryFromPrimitive;
 
@@ -114,8 +113,8 @@ async fn main(_spawner: Spawner) -> ! {
     ];
 
     let mut colors = [RGB8 { r: 0, g: 0, b: 0 }; 11];
-    let ws_lut = ws2812::MultiBitWs2812Lookup::<u16, 16>::new(0b100, 3, 0b1100, 4);
-    let mut ws = Ws2812SpiCustom::<u8, _, _, 11, 4>::new(spi, ws_lut);
+    let ws_lut = SmartLedsSpiLut::<u16, 16>::new(0b100, 3, 0b1100, 4);
+    let mut ws = SmartLedsSpi::<u8, _, _, 11, 4>::new(spi, ws_lut);
     // flash on start
     colors[0] = RGB8 { r: 0, g: 7, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();
