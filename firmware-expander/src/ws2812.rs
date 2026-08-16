@@ -85,6 +85,33 @@ impl Ws2812SpiLookupTable for OneBitWs2812LookupTable {
 }
 
 
+pub struct MultiBitWs2812Lookup<T, const N: usize>
+{
+    table: [T; N],
+    bits: [u8; N],
+}
+
+impl <T, const N: usize> MultiBitWs2812Lookup<T, N>
+{
+    const INDEX_MASK : u8 = (N as u8) - 1;
+
+    pub fn new(zero: u8, zero_bits: u8, one: u8, one_bits: u8) -> Self {
+        Self { [] }
+    }
+}
+
+impl <T, const N: usize> Ws2812SpiLookupTable for MultiBitWs2812Lookup<T, N> 
+where T: Copy
+{
+  const INDEX_BITS: u8 = N.ilog2() as u8;
+  type Output = T;
+
+  fn get(&self, value: u8) -> (Self::Output, u8) {
+      (self.table[(value & Self::INDEX_MASK) as usize], self.bits[(value & Self::INDEX_MASK) as usize])
+  }
+}
+
+
 /// WS2812 LED driver with customizable SPI word size and bit encoding
 /// N is the maximum number of LEDs in the chain, for buffer sizing
 /// WORDS_PER_COLOR is the maximum number of SPI words used to encode a single color of LED data
