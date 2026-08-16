@@ -31,13 +31,15 @@ use ws2812_async::{Grb, Ws2812};
 
 use smart_leds::{RGB8, SmartLedsWriteAsync};
 
+use num_enum::TryFromPrimitive;
+
 use core::panic::PanicInfo;
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // This blows up flash usage
     // This will print the panic message, file, and line number via defmt!
     // defmt::error!("{}", defmt::Display2Format(info));
-    defmt::error!("panic");
+    error!("panic");
     loop {
         core::hint::spin_loop();
     }
@@ -58,7 +60,8 @@ use embassy_time::Timer;
 
 
 // TODO keep sync'd with main expander.rs
-#[derive(PartialEq, defmt::Format)]
+#[derive(PartialEq, TryFromPrimitive, defmt::Format)]
+#[repr(u8)]
 enum Opcode {
     Resrved = 0x00,
     ReadBtns = 0x01, 
@@ -118,45 +121,37 @@ async fn main(_spawner: Spawner) -> ! {
         match cmd.kind {
             SlaveCommandKind::Write => {
                 let mut buf = [0u8; 8];
-                match i2c.respond_to_write(&mut buf).await {
-                    Ok(1) => {
-                        match buf[0] {
-                            op if op == Opcode::UpdateRgbs as u8 => {
-                                update_ws = true;
-                                info!("i2c write: update leds");
-                            },
-                            op if op == Opcode::ReadBtns as u8 => {
-                                last_read_opcode = Opcode::ReadBtns;
-                            },
-                            op => {
-                                error!("i2c write: unknown len 1 opcode {}", op);
-                            }
+                match i2c.respond_to_write(&mut buf).await.map(|n| (buf.first().and_then(|x| Opcode::try_from(*x).ok()), n)) {
+                    Ok((Some(Opcode::WriteRgbIndex), 5)) => {
+                        let index = buf[1] as usize;
+                        if index < colors.len() {
+                            colors[index] = RGB8 { r: buf[2], g: buf[3], b: buf[4] };
+                        } else {
+                            error!("i2c write: index {} out of bounds", index);
                         }
+                        info!("i2c write: write rgb index {}", index);
                     },
-                    Ok(5) => {
-                        match buf[0] {
-                            op if op == Opcode::WriteRgbIndex as u8 => {
-                                let index = buf[1] as usize;
-                                if index < colors.len() {
-                                    colors[index] = RGB8 { r: buf[2], g: buf[3], b: buf[4] };
-                                } else {
-                                    error!("i2c write: index {} out of bounds", index);
-                                }
-                                info!("i2c write: write rgb index {}", index);
-                            },
-                            op => {
-                                error!("i2c write: unknown len 5 opcode {}", op);
-                            }
-                        }
+                    Ok((Some(Opcode::UpdateRgbs), 1)) => {
+                        update_ws = true;
+                        info!("i2c write: update leds");
                     },
-                    Ok(n) => {
-                        error!("i2c write error: unknown len {}", n);
+                    Ok((Some(Opcode::ReadBtns), 1)) => {
+                        last_read_opcode = Opcode::ReadBtns;
+                        info!("i2c write: read btns");
+                    },
+                    Ok((_, 0)) => {
+                        info!("i2c write: no data");
                     }
-                    Err(e) => error!("i2c write error: {:?}", e),
+                    Ok((_, n)) => {
+                        error!("i2c write: unknown opcode {} len {}", buf[0], n);
+                    }
+                    Err(e) => {
+                        error!("i2c write error: {:?}", e);
+                    }
                 }
-            }
-
+            },
             SlaveCommandKind::Read => {
+                let mut buf = [0u8; 8];
                 match i2c.respond_to_read(&buf).await {
                     Ok(status) if last_read_opcode == Opcode::ReadBtns => {
                         let mut btns_state = 0u8;
