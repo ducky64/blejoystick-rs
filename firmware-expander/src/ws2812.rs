@@ -156,9 +156,7 @@ where
     }
 
     fn flat_buffer(buffer: &mut [[[Word; WORDS_PER_COLOR]; 3]; N]) -> &mut [Word] {
-        let len = N * 3 * WORDS_PER_COLOR;
-        let ptr = buffer.as_mut_ptr() as *mut Word;
-        unsafe { core::slice::from_raw_parts_mut(ptr, len) }
+        buffer.as_flattened_mut().as_flattened_mut()
     }
 
     /// Write the colors to SPI bits in a buffer for transmission, returning the number of words.
@@ -173,6 +171,8 @@ where
             assert!(Lut::Output::BITS >= Word::BITS, "Lut::Output must larger or equal to than Word");
         };
         
+        let index_mask = (1 << Lut::INDEX_BITS) - 1;
+
         let mut buffer_index = 0;  // of the current word being written
         let mut word_buffer: Word = Word::default();  // accumulates SPI bits per word, LSbit aligned
         let mut word_bits = 0;  // number of bits written into word_buffer
@@ -182,7 +182,6 @@ where
             for color_byte in [item.g, item.r, item.b] {
                 let mut written_bits: u8 = 0;
                 while written_bits < 8 {
-                  let index_mask = (1 << Lut::INDEX_BITS) - 1;
                   let lut_index = (color_byte >> (8 - written_bits - Lut::INDEX_BITS)) & index_mask;
                   let (spi_data, mut spi_bits) = lut.get(lut_index);
                   written_bits += Lut::INDEX_BITS;
@@ -193,7 +192,7 @@ where
                       let shift_bits = min(spi_bits, Word::BITS - word_bits);
                       if shift_bits < Word::BITS {
                           word_buffer = (word_buffer << shift_bits) | Word::truncated_from(spi_data >> (spi_bits - shift_bits));
-                      } else {
+                      } else {  // a full shift panics
                           word_buffer = Word::truncated_from(spi_data >> (spi_bits - shift_bits));
                       }
                       
