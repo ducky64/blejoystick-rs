@@ -151,25 +151,21 @@ async fn main(_spawner: Spawner) -> ! {
                 }
             },
             SlaveCommandKind::Read => {
-                let mut buf = [0u8; 8];
-                match i2c.respond_to_read(&buf).await {
-                    Ok(status) if last_read_opcode == Opcode::ReadBtns => {
+                match last_read_opcode {
+                    Opcode::ReadBtns => {
                         let mut btns_state = 0u8;
                         for (i, btn) in btns.iter().enumerate() {
                             if btn.is_low() {
                                 btns_state |= 1 << i;
                             }
                         }
-                        info!("i2c write: read buttons, state {:08b}", btns_state);
-                        // respond with button state
-                        let _ = i2c.respond_to_read(&[btns_state]).await;
-
-                        info!("i2c read ok: {:?}", status)
+                        info!("i2c read: read buttons, state {:08b}", btns_state);
+                        i2c.respond_to_read(&[btns_state]).await.inspect_err(|e| error!("i2c read error: {:?}", e)).ok();
                     },
-                    Ok(status) => {
-                        error!("i2c read error: unexpected opcode {:?}, status {:?}", last_read_opcode, status);
-                    },
-                    Err(e) => error!("i2c read error: {:?}", e),
+                    _ => {
+                        error!("i2c read: unknown last opcode {:?}", last_read_opcode);
+                        i2c.respond_to_read(&[]).await.inspect_err(|e| error!("i2c read error: {:?}", e)).ok();
+                    }
                 }
             }
         }
