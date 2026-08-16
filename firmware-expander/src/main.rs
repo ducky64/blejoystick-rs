@@ -107,9 +107,9 @@ async fn main(_spawner: Spawner) -> ! {
     colors[0] = RGB8 { r: 0, g: 0, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();  // clear LEDs on start
 
-    loop {
-        let mut update_ws = false;
+    let mut update_ws = false;
 
+    loop {
         let cmd = match i2c.listen().await {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -171,7 +171,14 @@ async fn main(_spawner: Spawner) -> ! {
         }
 
         if update_ws {
-            ws.write(colors.into_iter()).await.unwrap();
+            match ws.write(colors.into_iter()).await {
+                Ok(()) => {
+                    update_ws = false;
+                }
+                Err(e) => {
+                    error!("ws write error: {:?}", e);
+                }
+            }
         }
     }
 }

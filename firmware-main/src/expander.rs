@@ -35,7 +35,10 @@ impl<I2C> Expander<I2C>
 
     pub async fn read_btns(&mut self) -> Result<u8, I2C::Error> {
         let mut buffer = [0u8; 1];
-        self.i2c.write_read(Self::I2C_ADDRESS, &[Opcode::ReadBtns as u8], &mut buffer).await?;
+        self.i2c.write(Self::I2C_ADDRESS, &[Opcode::ReadBtns as u8]).await?;
+        self.i2c.read(Self::I2C_ADDRESS, &mut buffer).await?;
+        // seems to break with the I2C peripheral HAL on CH32 side
+        // self.i2c.write_read(Self::I2C_ADDRESS, &[Opcode::ReadBtns as u8], &mut buffer).await?;
         Ok(buffer[0])
     }
 }
