@@ -19,15 +19,17 @@
 /// ]
 use ch32_hal as hal;
 use hal::{bind_interrupts, peripherals};
-use hal::gpio::{Input, Pull};
+use hal::gpio::{Flex, Input, Pull, Speed};
 use hal::i2c::slave::{I2cSlave, SlaveCommandKind, SlaveConfig};
 use hal::prelude::Hertz;
 use hal::spi::Spi;
+use hal::pac::rcc::vals::{Hpre as AHBPrescaler, Pllsrc as PllSource, Ppre as APBPrescaler, Sw as Sysclk};
 
 use defmt_rtt as _;
 mod prelude;
 use prelude::*;
-use ws2812_async::{Grb, Ws2812};
+mod ws2812;
+use ws2812::Ws2812SpiCustom;
 
 use smart_leds::{RGB8, SmartLedsWriteAsync};
 
@@ -72,8 +74,14 @@ enum Opcode {
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) -> ! {
     let mut config = hal::Config::default();
-    config.rcc = hal::rcc::Config::SYSCLK_FREQ_48MHZ_HSI;
-    let p = hal::init(config);
+    config.rcc = hal::rcc::Config {  // effectively 12MHz
+        hse: None,
+        sys: Sysclk::HSI,
+        pll_src: PllSource::HSI,
+        ahb_pre: AHBPrescaler::DIV2,
+        apb2_pre: APBPrescaler::DIV4,
+    };
+    let mut p = hal::init(config);
 
     info!("Init");
 
@@ -82,8 +90,16 @@ async fn main(_spawner: Spawner) -> ! {
     let mut i2c = I2cSlave::new::<0>(p.I2C1, p.PC2, p.PC1, Irqs, i2c_config);
     let mut last_read_opcode: Opcode = Opcode::ReadBtns;
 
+    {   // this probably doesn't actually do anything useful
+        let mut pc6 = Flex::new(p.PC6.reborrow());
+        pc6.set_as_output(Speed::Low);
+        pc6.set_low();
+    }
+
     let mut spi_config = hal::spi::Config::default();
     spi_config.frequency = Hertz::khz(3000);
+    // required to avoid an extra leading edge on SPI when not at 48 MHz
+    spi_config.mode = embedded_hal::spi::MODE_1;
     let spi = Spi::new_txonly_nosck::<0>(p.SPI1, p.PC6, p.DMA1_CH3, spi_config);
 
     let btns: [Input; 8] = [
@@ -98,11 +114,11 @@ async fn main(_spawner: Spawner) -> ! {
     ];
 
     let mut colors = [RGB8 { r: 0, g: 0, b: 0 }; 11];
-    let mut ws: Ws2812<_, Grb, 11> = Ws2812::new(spi);
+    let mut ws = Ws2812SpiCustom::<u8, _, 11, 4>::new(spi, 0b100, 4, 0b1100, 4);
     // flash on start
     colors[0] = RGB8 { r: 0, g: 7, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();
-    Timer::after_millis(10).await;
+    Timer::after_millis(5).await;
     colors[0] = RGB8 { r: 0, g: 0, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();  // clear LEDs on start
 
