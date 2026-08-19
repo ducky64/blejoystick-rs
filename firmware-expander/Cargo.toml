@@ -41,12 +41,12 @@ smartleds-spi-lut = { path = "../../smartleds-spi-lut-async" }
 [profile.release]
 strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
 lto = true
-opt-level = 3
+opt-level = "s"
 
 [profile.dev]
 strip = false
 lto = true
-opt-level = 3
+opt-level = "s"
 
 [patch.crates-io]
 ch32-hal = { git = "https://github.com/korbin/ch32-hal.git", rev = "14b425d8fc041abe5651ade1b675df3c05725e09" }  # i2c peripheral support

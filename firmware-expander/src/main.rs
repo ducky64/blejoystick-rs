@@ -78,15 +78,17 @@ async fn main(_spawner: Spawner) -> ! {
         sys: Sysclk::HSI,
         pll_src: PllSource::HSI,
         ahb_pre: AHBPrescaler::DIV2,
-        apb2_pre: APBPrescaler::DIV4,
+        apb2_pre: APBPrescaler::DIV16,
     };
     let mut p = hal::init(config);
 
     info!("Init");
 
-    let mut i2c_config = SlaveConfig::default();
-    i2c_config.addr = 0x42;
-    let mut i2c = I2cSlave::new::<0>(p.I2C1, p.PC2, p.PC1, Irqs, i2c_config);
+    let mut i2c = {
+        let mut i2c_config = SlaveConfig::default();
+        i2c_config.addr = 0x42;
+        I2cSlave::new::<0>(p.I2C1, p.PC2, p.PC1, Irqs, i2c_config)
+    };
     let mut last_read_opcode: Opcode = Opcode::ReadBtns;
 
     {   // this probably doesn't actually do anything useful
@@ -95,11 +97,13 @@ async fn main(_spawner: Spawner) -> ! {
         pc6.set_low();
     }
 
-    let mut spi_config = hal::spi::Config::default();
-    spi_config.frequency = Hertz::khz(3000);
-    // required to avoid an extra leading edge on SPI when not at 48 MHz
-    spi_config.mode = embedded_hal::spi::MODE_1;
-    let spi = Spi::new_txonly_nosck::<0>(p.SPI1, p.PC6, p.DMA1_CH3, spi_config);
+    let spi = {
+        let mut spi_config = hal::spi::Config::default();
+        spi_config.frequency = Hertz::khz(3000);
+        // required to avoid an extra leading edge on SPI when not at 48 MHz
+        spi_config.mode = embedded_hal::spi::MODE_1;
+        Spi::new_txonly_nosck::<0>(p.SPI1, p.PC6, p.DMA1_CH3, spi_config)
+    };
 
     let btns: [Input; 8] = [
         Input::new(p.PD4, Pull::Up),
