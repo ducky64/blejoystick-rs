@@ -3,7 +3,7 @@ use embassy_nrf::gpio::Output;
 use embassy_nrf::twim::Twim;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer, Ticker};
 type I2cBus = Mutex<CriticalSectionRawMutex, Twim<'static>>;
 
 use crate::bus::GlobalBus;
@@ -64,6 +64,8 @@ pub(crate) async fn battery_task(
     chg_en.set_high();
 
     let conversion_time_us = config.conversion_time_us().unwrap();
+
+    let mut ticker = Ticker::every(Duration::from_millis(5000));
     loop {
         ina.trigger().await.unwrap();
         Timer::after_micros(conversion_time_us as u64).await;
@@ -71,7 +73,7 @@ pub(crate) async fn battery_task(
         let meas = ina.next_measurement().await.unwrap();
         if let Some(meas) = meas {
             let soc = interpolate_1d(&LIPO_V_SOC, meas.bus_voltage.voltage_mv()) as u8;
-            debug!(
+            info!(
                 "INA219: v={}, i={}, soc={}",
                 meas.bus_voltage, meas.current, soc
             );
@@ -80,6 +82,7 @@ pub(crate) async fn battery_task(
         } else {
             warn!("INA219: measurement unavailable");
         }
-        Timer::after_millis(1000).await;
+
+        ticker.next().await;
     }
 }

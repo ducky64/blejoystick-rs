@@ -144,7 +144,7 @@ async fn main(spawner: Spawner) {
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     let expander = Expander::new(I2cDevice::new(i2c_bus));
     let shared_expander = EXPANDER.init(Mutex::new(expander));
-    spawner.spawn(unwrap!(leds_task(led, shared_expander)));
+    spawner.spawn(unwrap!(leds_task(bus, led, shared_expander)));
 
     spawner.spawn(unwrap!(btns_task(bus, shared_expander)));
 
