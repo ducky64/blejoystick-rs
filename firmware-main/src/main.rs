@@ -189,16 +189,39 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn blinky(mut _led: Output<'static>, expander: &'static mut SharedExpander) {
-    let mut ticker = Ticker::every(Duration::from_millis(1000));
+    // initialize: clear all LEDs
+    {
+        let mut expander = expander.lock().await;
+        for i in 0..12 {
+            expander.write_rgb(i, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
+        }
+        expander.update_rgb().await.ok();
+    }
 
+    // startup animation
+    for i in 0..9 {
+        {
+            let mut expander = expander.lock().await;
+            if i > 0 {
+                expander.write_rgb(i - 1, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
+            }
+            if i < 8 {
+                expander.write_rgb(i, smart_leds::RGB8 { r: 0, g: 15, b: 15 }).await.ok();
+            }
+            expander.update_rgb().await.ok();
+        }
+        Timer::after(Duration::from_millis(50)).await;
+    }
+
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
         {
             let mut expander = expander.lock().await;
-            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
+            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 31, b: 0 }).await.ok();
             expander.update_rgb().await.ok();
         }
         Timer::after(Duration::from_millis(5)).await;
-        
+
         {
             let mut expander = expander.lock().await;
             expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
