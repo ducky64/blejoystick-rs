@@ -98,7 +98,7 @@ pub(crate) async fn joystick_task(
 #[embassy_executor::task]
 pub(crate) async fn btns_task(
     bus: &'static GlobalBus,
-    expander: &'static mut SharedExpander
+    expander: &'static SharedExpander
 ) {
     let mut ticker = Ticker::every(Duration::from_millis(20));
 
@@ -115,7 +115,7 @@ pub(crate) async fn btns_task(
         };
         {
             let mut expander = expander.lock().await;
-            expander.write_rgb(0, rgb_val).await.ok();
+            expander.write_rgb(2, rgb_val).await.ok();
             expander.update_rgb().await.ok();
         }
 

@@ -5,7 +5,7 @@ use crate::SharedExpander;
 
 
 #[embassy_executor::task]
-pub(crate) async fn leds_task(mut _led: Output<'static>, expander: &'static mut SharedExpander) {
+pub(crate) async fn leds_task(mut _led: Output<'static>, expander: &'static SharedExpander) {
     use smart_leds::RGB8;
     // initialize: clear all LEDs
     {
