@@ -62,6 +62,9 @@ use nrf_sdc::{self as sdc, mpsl};
 type I2cBus = Mutex<CriticalSectionRawMutex, Twim<'static>>;
 static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
+type SharedExpander = Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, Twim<'static>>>>;
+static EXPANDER: StaticCell<SharedExpander> = StaticCell::new();
+
 bind_interrupts!(struct Irqs {
     // BLE stack interrupts
     RNG => rng::InterruptHandler<RNG>;
@@ -136,12 +139,10 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(unwrap!(imu_task(bus, i2c_bus)));
 
-    // let mut expander: Expander<I2cDevice<'static, CriticalSectionRawMutex, &I2cBus>> = Expander::new(I2cDevice::new(&i2c_bus));
-    // let shared_expander = Mutex::new(expander);
-
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
-    // spawner.spawn(unwrap!(blinky(led, shared_expander)));
-    spawner.spawn(unwrap!(blinky(led, i2c_bus)));
+    let expander = Expander::new(I2cDevice::new(i2c_bus));
+    let shared_expander = EXPANDER.init(Mutex::new(expander));
+    spawner.spawn(unwrap!(blinky(led, shared_expander)));
 
     let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
@@ -187,24 +188,23 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-// async fn blinky(mut led: Output<'static>, mut expander: Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, I2cBus>>>) {
-async fn blinky(mut _led: Output<'static>, i2c_bus: &'static I2cBus) {
-    let mut expander = Expander::new(I2cDevice::new(&i2c_bus));
-
+async fn blinky(mut _led: Output<'static>, expander: &'static mut SharedExpander) {
     let mut ticker = Ticker::every(Duration::from_millis(1000));
-    loop {
-        // led.set_high();
-        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
-        expander.update_rgb().await.ok();
-        Timer::after(Duration::from_millis(5)).await;
-        // led.set_low();
-        expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
-        expander.update_rgb().await.ok();
-        
-        expander.read_btns().await.ok().map(|btns| {
-            info!("Buttons: {:08b}", btns);
-        });
 
+    loop {
+        {
+            let mut expander = expander.lock().await;
+            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 63, b: 0 }).await.ok();
+            expander.update_rgb().await.ok();
+        }
+        Timer::after(Duration::from_millis(5)).await;
+        
+        {
+            let mut expander = expander.lock().await;
+            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
+            expander.update_rgb().await.ok();
+        }
+        
         ticker.next().await;
     }
 }
