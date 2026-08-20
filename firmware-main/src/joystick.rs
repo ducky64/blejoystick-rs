@@ -5,7 +5,10 @@ use fixed::types::{I16F16, I1F15, U0F16};
 
 use embassy_nrf::gpio::{Input, Output};
 use embassy_nrf::saadc::Saadc;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, Ticker};
+
+use crate::SharedExpander;
+
 
 fn adc12_to_u0f16(adc: i16) -> U0F16 {
     // converts a unsigned raw 12-bit adc reading to U0F16, using the entire range
@@ -51,6 +54,8 @@ pub(crate) async fn joystick_task(
 
     let josytick_state_sender = bus.joystick_state.sender();
 
+    let mut ticker = Ticker::every(Duration::from_millis(20));
+
     loop {
         let mut buf = [0; 3];
         stick_gate.set_low();
@@ -85,6 +90,35 @@ pub(crate) async fn joystick_task(
             btn: false, //btn_value,
         };
         josytick_state_sender.send(joystick_state);
-        Timer::after(Duration::from_millis(20)).await;
+
+        ticker.next().await;
+    }
+}
+
+#[embassy_executor::task]
+pub(crate) async fn btns_task(
+    bus: &'static GlobalBus,
+    expander: &'static mut SharedExpander
+) {
+    let mut ticker = Ticker::every(Duration::from_millis(20));
+
+    loop {
+        let btns = {
+            let mut expander = expander.lock().await;
+            expander.read_btns().await.unwrap_or(0)
+        };
+
+        let rgb_val = if btns != 0 {
+            smart_leds::RGB8 { r: 15, g: 0, b: 15 }
+        } else {
+            smart_leds::RGB8 { r: 0, g: 0, b: 0 }
+        };
+        {
+            let mut expander = expander.lock().await;
+            expander.write_rgb(0, rgb_val).await.ok();
+            expander.update_rgb().await.ok();
+        }
+
+        ticker.next().await;
     }
 }

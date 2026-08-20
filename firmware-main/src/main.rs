@@ -33,14 +33,16 @@ mod battery;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
+mod leds;
 mod imu;
 mod joystick;
 mod prelude;
 mod util;
 mod expander;
+use crate::leds::leds_task;
 use crate::battery::battery_task;
 use crate::imu::imu_task;
-use crate::joystick::joystick_task;
+use crate::joystick::{btns_task, joystick_task};
 use crate::expander::Expander;
 use crate::prelude::*;
 
@@ -142,7 +144,9 @@ async fn main(spawner: Spawner) {
     let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     let expander = Expander::new(I2cDevice::new(i2c_bus));
     let shared_expander = EXPANDER.init(Mutex::new(expander));
-    spawner.spawn(unwrap!(blinky(led, shared_expander)));
+    spawner.spawn(unwrap!(leds_task(led, shared_expander)));
+
+    spawner.spawn(unwrap!(btns_task(bus, shared_expander)));
 
     let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
@@ -187,47 +191,3 @@ async fn main(spawner: Spawner) {
     ble_peripheral::run(bus, sdc).await;
 }
 
-#[embassy_executor::task]
-async fn blinky(mut _led: Output<'static>, expander: &'static mut SharedExpander) {
-    // initialize: clear all LEDs
-    {
-        let mut expander = expander.lock().await;
-        for i in 0..12 {
-            expander.write_rgb(i, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
-        }
-        expander.update_rgb().await.ok();
-    }
-
-    // startup animation
-    for i in 0..9 {
-        {
-            let mut expander = expander.lock().await;
-            if i > 0 {
-                expander.write_rgb(i - 1, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
-            }
-            if i < 8 {
-                expander.write_rgb(i, smart_leds::RGB8 { r: 0, g: 15, b: 15 }).await.ok();
-            }
-            expander.update_rgb().await.ok();
-        }
-        Timer::after(Duration::from_millis(50)).await;
-    }
-
-    let mut ticker = Ticker::every(Duration::from_millis(1000));
-    loop {
-        {
-            let mut expander = expander.lock().await;
-            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 31, b: 0 }).await.ok();
-            expander.update_rgb().await.ok();
-        }
-        Timer::after(Duration::from_millis(5)).await;
-
-        {
-            let mut expander = expander.lock().await;
-            expander.write_rgb(9, smart_leds::RGB8 { r: 0, g: 0, b: 0 }).await.ok();
-            expander.update_rgb().await.ok();
-        }
-        
-        ticker.next().await;
-    }
-}
