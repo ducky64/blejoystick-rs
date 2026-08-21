@@ -1,5 +1,3 @@
-use core::sync::atomic::Ordering;
-
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_nrf::gpio::Output;
 use embassy_nrf::twim::Twim;
@@ -91,19 +89,27 @@ pub(crate) async fn charger_task(
     bus: &'static GlobalBus,
     mut chg_en: Output<'static>,
 ) { 
+    let usb_powered_snd = bus.usb_powered.sender();
+    let charging_snd = bus.charging.sender();
     chg_en.set_low();  // disabled by default
 
     let mut ticker = Ticker::every(Duration::from_millis(250));
     loop {
         let vbus_present = embassy_nrf::pac::POWER.usbregstatus().read().vbusdetect();
-        bus.usb_powered.store(vbus_present, Ordering::Relaxed);
+        if bus.usb_powered.try_get().map(|x| x != vbus_present).unwrap_or(true) {
+            usb_powered_snd.send(vbus_present);
+        }
+
         // TODO configable charge threshold
-        if vbus_present && bus.vbat_soc.try_get().map(|soc| soc <= 80).unwrap_or(false) {
+        let charging = if vbus_present && bus.vbat_soc.try_get().map(|soc| soc <= 80).unwrap_or(false) {
             chg_en.set_high();
-            bus.charging.store(true, Ordering::Relaxed);
+            true
         } else {
             chg_en.set_low();
-            bus.charging.store(false, Ordering::Relaxed);
+            false
+        };
+        if bus.charging.try_get().map(|x| x != charging).unwrap_or(true) {
+            charging_snd.send(charging);
         }
 
         ticker.next().await;

@@ -1,8 +1,8 @@
-use core::sync::atomic::Ordering;
-
 use embassy_nrf::gpio::{Output};
-use embassy_time::{Duration, Timer, Ticker};
+use embassy_time::{Duration, Timer};
 use smart_leds::RGB8;
+
+use embassy_futures::select::select3;
 
 use crate::bus::GlobalBus;
 use crate::SharedExpander;
@@ -54,11 +54,15 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
 
     let mut soc_recv = bus.vbat_soc.receiver().unwrap();
 
+    let mut usb_powered_rcv = bus.usb_powered.receiver().unwrap();
+    let mut charging_rcv = bus.charging.receiver().unwrap();
+
     loop {
         let soc = soc_recv.get().await;
         let rgb_soc = soc_to_rgb(soc);
-        if bus.usb_powered.load(Ordering::Relaxed) {  // USB powered, keep LED on
-            if bus.charging.load(Ordering::Relaxed) {  // charging, blink
+        
+        let blink_wait = if bus.usb_powered.try_get().unwrap_or(false) {  // USB powered, keep LED on
+            if bus.charging.try_get().unwrap_or(false) {  // charging, blink
                 {
                     let mut expander = expander.lock().await;
                     expander.write_rgb(9, rgb_soc).await.ok();
@@ -71,12 +75,12 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
                     expander.write_rgb(9, RGB_ZERO).await.ok();
                     expander.update_rgb().await.ok();
                 }
-                Timer::after(Duration::from_millis(500)).await;
+                500
             } else {  // not charging, solid
                 let mut expander = expander.lock().await;
                 expander.write_rgb(9, rgb_soc).await.ok();
                 expander.update_rgb().await.ok();
-                Timer::after(Duration::from_millis(500)).await;
+                500
             }
         } else { // battery powered, slow blink
 
@@ -92,7 +96,13 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
                 expander.write_rgb(9, RGB_ZERO).await.ok();
                 expander.update_rgb().await.ok();
             }
-            Timer::after(Duration::from_millis(2500)).await;
-        }
+            2500
+        };
+
+        select3(
+            Timer::after(Duration::from_millis(blink_wait)),
+            usb_powered_rcv.changed(),
+            charging_rcv.changed(),
+        ).await;
     }
 }

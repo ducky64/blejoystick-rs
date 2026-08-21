@@ -5,7 +5,7 @@ use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
 use fixed::types::I1F15;
-use portable_atomic::{AtomicBool, AtomicU64};
+use portable_atomic::{AtomicU64};
 use sequential_storage::{
     cache::{Cache, Uncached},
     map::{Key, MapConfig, MapStorage, SerializationError},
@@ -78,8 +78,8 @@ pub struct GlobalBus {
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
     pub vbat_mv: Watch<CriticalSectionRawMutex, u16, 2>,
     pub vbat_soc: Watch<CriticalSectionRawMutex, u8, 2>,  // 0 - 100 inclusive
-    pub usb_powered: AtomicBool,
-    pub charging: AtomicBool,
+    pub usb_powered: Watch<CriticalSectionRawMutex, bool, 2>,
+    pub charging: Watch<CriticalSectionRawMutex, bool, 2>,
     pub last_activity: AtomicU64,  // timestamp of last activity for power keep-alice
 }
 
@@ -99,8 +99,8 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
         vbat_mv: Watch::new(),
         vbat_soc: Watch::new(),
 
-        usb_powered: AtomicBool::new(false),
-        charging: AtomicBool::new(false),
+        usb_powered: Watch::new(),
+        charging: Watch::new(),
         last_activity: AtomicU64::new(0),
     })
 }
