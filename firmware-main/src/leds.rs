@@ -54,7 +54,6 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
 
     let mut soc_recv = bus.vbat_soc.receiver().unwrap();
 
-    let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
         let soc = soc_recv.get().await;
         let rgb_soc = soc_to_rgb(soc);
@@ -72,10 +71,12 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
                     expander.write_rgb(9, RGB_ZERO).await.ok();
                     expander.update_rgb().await.ok();
                 }
+                Timer::after(Duration::from_millis(500)).await;
             } else {  // not charging, solid
                 let mut expander = expander.lock().await;
                 expander.write_rgb(9, rgb_soc).await.ok();
                 expander.update_rgb().await.ok();
+                Timer::after(Duration::from_millis(500)).await;
             }
         } else { // battery powered, slow blink
 
@@ -91,8 +92,7 @@ pub(crate) async fn leds_task(bus: &'static GlobalBus, mut _led: Output<'static>
                 expander.write_rgb(9, RGB_ZERO).await.ok();
                 expander.update_rgb().await.ok();
             }
+            Timer::after(Duration::from_millis(2500)).await;
         }
-          
-        ticker.next().await;
     }
 }
