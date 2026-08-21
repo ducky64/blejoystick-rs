@@ -37,7 +37,7 @@ nrf-mpsl = { version = "0.3", default-features = false, features = [
 ] }
 
 defmt = { version = "1.0" }
-defmt-rtt = "1.0"
+defmt-rtt = { version = "1.0", features=["disable-blocking-mode"] }
 panic-probe = { version = "1.0", features = ["print-defmt"] }
 
 heapless = { version = "0.9", features = ["serde"] }

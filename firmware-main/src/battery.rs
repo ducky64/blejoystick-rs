@@ -132,7 +132,7 @@ pub(crate) async fn power_task(
     let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
         let soc_shutoff = bus.vbat_soc.try_get().map(|soc| soc <= 5).unwrap_or(false);
-        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 15_000_000;
+        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 600_000_000;
 
         if soc_shutoff || activity_shutoff {
             pwr_gate.set_low();
