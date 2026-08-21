@@ -106,7 +106,7 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
 }
 
 impl GlobalBus {
-    pub fn activity(&mut self) {
+    pub fn activity(&self) {
         let now = embassy_time::Instant::now().as_micros() as u64;
         self.last_activity.store(now, Ordering::Relaxed);
     }

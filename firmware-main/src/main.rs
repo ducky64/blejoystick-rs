@@ -53,7 +53,6 @@ use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_nrf::twim::{self, Twim};
-use embassy_time::{Duration, Timer, Ticker};
 
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;

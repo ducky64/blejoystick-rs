@@ -83,6 +83,10 @@ pub(crate) async fn joystick_task(
             x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
         );
 
+        if x_linear != 0 || y_linear != 0 {
+            bus.activity(); // keep alive if joystick is being used
+        }
+
         let joystick_state = JoystickState {
             x: x_linear,
             y: y_linear,
@@ -107,6 +111,10 @@ pub(crate) async fn btns_task(
             let mut expander = expander.lock().await;
             expander.read_btns().await.unwrap_or(0)
         };
+
+        if btns != 0 {
+            bus.activity(); // keep alive if buttons are being pressed
+        }
 
         let rgb_val = if btns != 0 {
             smart_leds::RGB8 { r: 15, g: 0, b: 15 }

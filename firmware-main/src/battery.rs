@@ -1,3 +1,5 @@
+use core::sync::atomic::Ordering;
+
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_nrf::gpio::Output;
 use embassy_nrf::twim::Twim;
@@ -99,6 +101,9 @@ pub(crate) async fn charger_task(
         if bus.usb_powered.try_get().map(|x| x != vbus_present).unwrap_or(true) {
             usb_powered_snd.send(vbus_present);
         }
+        if vbus_present {
+            bus.activity();  // keep alive if USB power present
+        }
 
         // TODO configable charge threshold
         let charging = if vbus_present && bus.vbat_soc.try_get().map(|soc| soc <= 80).unwrap_or(false) {
@@ -126,6 +131,15 @@ pub(crate) async fn power_task(
 
     let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
+        let soc_shutoff = bus.vbat_soc.try_get().map(|soc| soc <= 5).unwrap_or(false);
+        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 15_000_000;
+
+        if soc_shutoff || activity_shutoff {
+            pwr_gate.set_low();
+        } else {
+            pwr_gate.set_high();
+        }
+
         // TODO implement me
         ticker.next().await;
     }
