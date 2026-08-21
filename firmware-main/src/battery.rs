@@ -1,3 +1,5 @@
+use core::sync::atomic::Ordering;
+
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_nrf::gpio::Output;
 use embassy_nrf::twim::Twim;
@@ -29,7 +31,6 @@ const LIPO_V_SOC: [(u16, u16); 7] = [
 pub(crate) async fn battery_task(
     bus: &'static GlobalBus,
     i2c_bus: &'static I2cBus,
-    mut chg_en: Output<'static>,
 ) {
     let vbus_mv_sender = bus.vbat_mv.sender();
     let vbus_soc_sender = bus.vbat_soc.sender();
@@ -60,9 +61,6 @@ pub(crate) async fn battery_task(
         }
     };
 
-    // TODO charging control with voltage cutoff
-    chg_en.set_high();
-
     let conversion_time_us = config.conversion_time_us().unwrap();
 
     let mut ticker = Ticker::every(Duration::from_millis(5000));
@@ -83,6 +81,46 @@ pub(crate) async fn battery_task(
             warn!("INA219: measurement unavailable");
         }
 
+        ticker.next().await;
+    }
+}
+
+
+#[embassy_executor::task]
+pub(crate) async fn charger_task(
+    bus: &'static GlobalBus,
+    mut chg_en: Output<'static>,
+) { 
+    chg_en.set_low();  // disabled by default
+
+    let mut ticker = Ticker::every(Duration::from_millis(250));
+    loop {
+        let vbus_present = embassy_nrf::pac::POWER.usbregstatus().read().vbusdetect();
+        bus.usb_powered.store(vbus_present, Ordering::Relaxed);
+        // TODO configable charge threshold
+        if vbus_present && bus.vbat_soc.try_get().map(|soc| soc <= 80).unwrap_or(false) {
+            chg_en.set_high();
+            bus.charging.store(true, Ordering::Relaxed);
+        } else {
+            chg_en.set_low();
+            bus.charging.store(false, Ordering::Relaxed);
+        }
+
+        ticker.next().await;
+    }
+}
+
+
+#[embassy_executor::task]
+pub(crate) async fn power_task(
+    bus: &'static GlobalBus,
+    mut pwr_gate: Output<'static>,
+) {
+    pwr_gate.set_high();
+
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
+    loop {
+        // TODO implement me
         ticker.next().await;
     }
 }

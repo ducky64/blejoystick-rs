@@ -40,7 +40,7 @@ mod prelude;
 mod util;
 mod expander;
 use crate::leds::leds_task;
-use crate::battery::battery_task;
+use crate::battery::{battery_task, charger_task, power_task};
 use crate::imu::imu_task;
 use crate::joystick::{btns_task, joystick_task};
 use crate::expander::Expander;
@@ -134,10 +134,13 @@ async fn main(spawner: Spawner) {
     // initialise peripherals and tasks
     // power gate for battery connection
     let pwr_gate = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
+    spawner.spawn(unwrap!(power_task(bus, pwr_gate)));
 
     // pull high to enable charging, low to disable
-    let chg_en = Output::new(p.P1_11, Level::Low, OutputDrive::Standard);
-    spawner.spawn(unwrap!(battery_task(bus, i2c_bus, chg_en)));
+    let chg_en = Output::new(p.P1_11, Level::High, OutputDrive::Standard);
+    spawner.spawn(unwrap!(charger_task(bus, chg_en)));
+
+    spawner.spawn(unwrap!(battery_task(bus, i2c_bus)));
 
     spawner.spawn(unwrap!(imu_task(bus, i2c_bus)));
 
