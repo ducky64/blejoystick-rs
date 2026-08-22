@@ -154,7 +154,6 @@ dependencies = [
  "micromath",
  "nrf-mpsl",
  "nrf-sdc",
- "panic-probe",
  "portable-atomic",
  "qmc5883p",
  "rand_chacha",
@@ -1297,16 +1296,6 @@ checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
 dependencies = [
  "elliptic-curve",
  "primeorder",
-]
-
-[[package]]
-name = "panic-probe"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd402d00b0fb94c5aee000029204a46884b1262e0c443f166d86d2c0747e1a1a"
-dependencies = [
- "cortex-m",
- "defmt 1.0.1",
 ]
 
 [[package]]

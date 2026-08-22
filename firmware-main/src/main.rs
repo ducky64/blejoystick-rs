@@ -22,7 +22,6 @@
 /// 0.dp=D+, 24,
 /// 0.dm=D-, 23]
 use defmt_rtt as _;
-use panic_probe as _;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -65,6 +64,20 @@ static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
 type SharedExpander = Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, Twim<'static>>>>;
 static EXPANDER: StaticCell<SharedExpander> = StaticCell::new();
+
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    // power off battery, if on battery
+    unsafe {
+        let p0 = embassy_nrf::pac::P0;
+        p0.outclr().write(|w| w.set_pin(7, true));
+    }
+
+    error!("{}", defmt::Display2Format(info));
+    cortex_m::asm::udf();
+}
+
 
 bind_interrupts!(struct Irqs {
     // BLE stack interrupts
