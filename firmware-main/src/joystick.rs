@@ -5,7 +5,7 @@ use fixed::types::{I16F16, I1F15, U0F16};
 
 use embassy_nrf::gpio::{Input, Output};
 use embassy_nrf::saadc::Saadc;
-use embassy_time::{Duration, Timer, Ticker};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::SharedExpander;
 
@@ -104,7 +104,10 @@ pub(crate) async fn btns_task(
     bus: &'static GlobalBus,
     expander: &'static SharedExpander
 ) {
+    const SHUTDOWN_HOLD_TIME: Duration = Duration::from_secs(1);
+
     let btns_snd = bus.buttons_state.sender();
+    let mut shutdown_button_held_time = Instant::now();
 
     let mut ticker = Ticker::every(Duration::from_millis(20));
 
@@ -118,6 +121,15 @@ pub(crate) async fn btns_task(
 
         if btns != 0 {
             bus.activity(); // keep alive if buttons are being pressed
+        }
+
+        if (btns & (1 << 3) != 0) && bus.joystick_state.try_get().map(|js| js.btn).unwrap_or(false) {
+            if shutdown_button_held_time.elapsed() >= SHUTDOWN_HOLD_TIME {
+                info!("shutdown button held for {} seconds, requesting shutdown", SHUTDOWN_HOLD_TIME.as_secs());
+                bus.shutdown_requested.sender().send(true);
+            }
+        } else {
+            shutdown_button_held_time = Instant::now();
         }
 
         ticker.next().await;

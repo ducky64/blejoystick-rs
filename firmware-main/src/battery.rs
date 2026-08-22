@@ -138,7 +138,7 @@ pub(crate) async fn power_task(
         select(shutdown_rcv.changed(), ticker.next()).await;
 
         let soc_shutoff = bus.vbat_soc.try_get().map(|soc| soc <= 5).unwrap_or(false);
-        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 5_000_000;
+        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 600_000_000;
         let requested_shutoff = bus.shutdown_requested.try_get().unwrap_or(false);
 
         if soc_shutoff || activity_shutoff || requested_shutoff {
