@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_nrf::nvmc::Nvmc;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch, semaphore::GreedySemaphore};
 use fixed::types::I1F15;
 use portable_atomic::{AtomicU64};
 use sequential_storage::{
@@ -82,6 +82,9 @@ pub struct GlobalBus {
     pub usb_powered: Watch<CriticalSectionRawMutex, bool, 2>,
     pub charging: Watch<CriticalSectionRawMutex, bool, 2>,
     pub last_activity: AtomicU64,  // timestamp of last activity for power keep-alive
+
+    pub shutdown_requested: Watch<CriticalSectionRawMutex, bool, 2>,  // set to indicate shutdown is requested or in progress
+    pub shutdown_locks: GreedySemaphore<CriticalSectionRawMutex>,  // locks indicating processes waiting to complete before shutdown
 }
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
@@ -104,10 +107,15 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
         usb_powered: Watch::new(),
         charging: Watch::new(),
         last_activity: AtomicU64::new(0),
+
+        shutdown_requested: Watch::new(),
+        shutdown_locks: GreedySemaphore::new(GlobalBus::SHUTDOWN_LOCKS),
     })
 }
 
 impl GlobalBus {
+    pub const SHUTDOWN_LOCKS: usize = 4;
+
     pub fn activity(&self) {
         let now = embassy_time::Instant::now().as_micros() as u64;
         self.last_activity.store(now, Ordering::Relaxed);

@@ -1,7 +1,8 @@
+use embassy_sync::semaphore::Semaphore;
 use embassy_time::{Duration, Timer};
 use smart_leds::RGB8;
 
-use embassy_futures::select::{self, select, select3};
+use embassy_futures::select::{self, select, select4};
 
 use crate::bus::GlobalBus;
 use crate::SharedExpander;
@@ -26,6 +27,14 @@ const RGB_ZERO : RGB8 = RGB8 { r: 0, g: 0, b: 0 };
 
 #[embassy_executor::task]
 pub(crate) async fn battery_led_task(bus: &'static GlobalBus, expander: &'static SharedExpander) {
+    let mut soc_recv = bus.vbat_soc.receiver().unwrap();
+
+    let mut usb_powered_rcv = bus.usb_powered.receiver().unwrap();
+    let mut charging_rcv = bus.charging.receiver().unwrap();
+    let mut shutdown_rcv = bus.shutdown_requested.receiver().unwrap();
+
+    let _shutdown_lock = bus.shutdown_locks.try_acquire(1).unwrap();
+      
     // initialize: clear all LEDs
     {
         let mut expander = expander.lock().await;
@@ -52,12 +61,11 @@ pub(crate) async fn battery_led_task(bus: &'static GlobalBus, expander: &'static
 
     Timer::after(Duration::from_millis(500)).await;
 
-    let mut soc_recv = bus.vbat_soc.receiver().unwrap();
-
-    let mut usb_powered_rcv = bus.usb_powered.receiver().unwrap();
-    let mut charging_rcv = bus.charging.receiver().unwrap();
-
     loop {
+        if bus.shutdown_requested.try_get().unwrap_or(false) {
+            break;  // shutdown requested, exit loop
+        }
+
         let soc = soc_recv.get().await;
         let rgb_soc = soc_to_rgb(soc);
         
@@ -99,11 +107,27 @@ pub(crate) async fn battery_led_task(bus: &'static GlobalBus, expander: &'static
             2500
         };
 
-        select3(
+        select4(
             Timer::after(Duration::from_millis(blink_wait)),
             usb_powered_rcv.changed(),
             charging_rcv.changed(),
+            shutdown_rcv.changed()
         ).await;
+    }
+
+    // shutdown animation
+    for i in 0..9 {
+        {
+            let mut expander = expander.lock().await;
+            if i > 0 {
+                expander.write_rgb(i - 1, RGB_ZERO).await.ok();
+            }
+            if i < 8 {
+                expander.write_rgb(i, RGB8 { r: 15, g: 0, b: 0 }).await.ok();
+            }
+            expander.update_rgb().await.ok();
+        }
+        Timer::after(Duration::from_millis(50)).await;
     }
 }
 

@@ -1,10 +1,12 @@
 use core::sync::atomic::Ordering;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_futures::select::select;
 use embassy_nrf::gpio::Output;
 use embassy_nrf::twim::Twim;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_sync::semaphore::Semaphore;
 use embassy_time::{Duration, Timer, Ticker};
 type I2cBus = Mutex<CriticalSectionRawMutex, Twim<'static>>;
 
@@ -127,20 +129,31 @@ pub(crate) async fn power_task(
     bus: &'static GlobalBus,
     mut pwr_gate: Output<'static>,
 ) {
+    let mut shutdown_rcv = bus.shutdown_requested.receiver().unwrap();
+
     pwr_gate.set_high();
 
     let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
+        select(shutdown_rcv.changed(), ticker.next()).await;
+
         let soc_shutoff = bus.vbat_soc.try_get().map(|soc| soc <= 5).unwrap_or(false);
-        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 600_000_000;
+        let activity_shutoff = embassy_time::Instant::now().as_micros() as u64 > bus.last_activity.load(Ordering::Relaxed) + 5_000_000;
+        let requested_shutoff = bus.shutdown_requested.try_get().unwrap_or(false);
 
-        if soc_shutoff || activity_shutoff {
-            pwr_gate.set_low();
-        } else {
-            pwr_gate.set_high();
+        if soc_shutoff || activity_shutoff || requested_shutoff {
+            break;
         }
-
-        // TODO implement me
-        ticker.next().await;
     }
+
+    info!("shutdown requested");
+    bus.shutdown_requested.sender().send(true);
+
+    select(
+        bus.shutdown_locks.acquire_all(GlobalBus::SHUTDOWN_LOCKS),
+        Timer::after(Duration::from_millis(1000)),  // timeout
+    ).await;
+    
+    info!("power gate off");
+    pwr_gate.set_low();
 }
