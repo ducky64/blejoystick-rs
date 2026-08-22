@@ -38,7 +38,7 @@ mod joystick;
 mod prelude;
 mod util;
 mod expander;
-use crate::leds::leds_task;
+use crate::leds::{battery_led_task, io_led_task};
 use crate::battery::{battery_task, charger_task, power_task};
 use crate::imu::imu_task;
 use crate::joystick::{btns_task, joystick_task};
@@ -69,10 +69,8 @@ static EXPANDER: StaticCell<SharedExpander> = StaticCell::new();
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     // power off battery, if on battery
-    unsafe {
-        let p0 = embassy_nrf::pac::P0;
-        p0.outclr().write(|w| w.set_pin(7, true));
-    }
+    let p0 = embassy_nrf::pac::P0;
+    p0.outclr().write(|w| w.set_pin(7, true));
 
     error!("{}", defmt::Display2Format(info));
     cortex_m::asm::udf();
@@ -120,6 +118,8 @@ fn build_sdc<'d, const N: usize>(
         .build(p, rng, mpsl, mem)
 }
 
+
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut p = embassy_nrf::init(Default::default());
@@ -156,10 +156,11 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(unwrap!(imu_task(bus, i2c_bus)));
 
-    let led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
+    let _led = Output::new(p.P0_30, Level::Low, OutputDrive::Standard);
     let expander = Expander::new(I2cDevice::new(i2c_bus));
-    let shared_expander = EXPANDER.init(Mutex::new(expander));
-    spawner.spawn(unwrap!(leds_task(bus, led, shared_expander)));
+    let shared_expander: &mut Mutex<CriticalSectionRawMutex, Expander<I2cDevice<'static, CriticalSectionRawMutex, Twim<'static>>>> = EXPANDER.init(Mutex::new(expander));
+    spawner.spawn(unwrap!(battery_led_task(bus, shared_expander)));
+    spawner.spawn(unwrap!(io_led_task(bus, shared_expander)));
 
     spawner.spawn(unwrap!(btns_task(bus, shared_expander)));
 

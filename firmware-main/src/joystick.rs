@@ -54,7 +54,7 @@ pub(crate) async fn joystick_task(
 
     let josytick_state_sender = bus.joystick_state.sender();
 
-    let mut ticker = Ticker::every(Duration::from_millis(20));
+    let mut ticker = Ticker::every(Duration::from_millis(50));
 
     loop {
         let mut buf = [0; 3];
@@ -83,7 +83,7 @@ pub(crate) async fn joystick_task(
             x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
         );
 
-        if x_linear != 0 || y_linear != 0 {
+        if x_linear != 0 || y_linear != 0 || btn_value {
             bus.activity(); // keep alive if joystick is being used
         }
 

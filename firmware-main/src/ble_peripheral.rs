@@ -383,11 +383,9 @@ async fn joystick_task<C: Controller, P: PacketPool>(
 
         // handle buttons
         let mut report_buttons: u8 = 0;
-
         if joystick.btn {
             report_buttons |= 1 << 0; // left click
         }
-
         let btns = bus.buttons_state.try_get().unwrap_or(0);
         if (btns & (1 << 1)) != 0 {
             report_buttons |= 1 << 3; // back button
