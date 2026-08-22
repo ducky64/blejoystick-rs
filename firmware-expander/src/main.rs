@@ -118,7 +118,8 @@ async fn main(_spawner: Spawner) -> ! {
 
     let mut colors = [RGB8 { r: 0, g: 0, b: 0 }; 11];
     let ws_lut = SmartLedsSpiLut::<u16, 16>::new(0b100, 3, 0b1100, 4);
-    let mut ws = SmartLedsSpi::<u8, _, _, 11, 4>::new(spi, ws_lut);
+    // only 11 LEDs, extra is for idle first bit
+    let mut ws = SmartLedsSpi::<u8, _, _, 12, 4>::new(spi, ws_lut);
     // flash on start
     colors[0] = RGB8 { r: 0, g: 7, b: 0 };
     ws.write(colors.into_iter()).await.unwrap();

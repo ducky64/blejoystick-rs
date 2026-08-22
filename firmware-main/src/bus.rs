@@ -81,7 +81,7 @@ pub struct GlobalBus {
     pub vbat_soc: Watch<CriticalSectionRawMutex, u8, 2>,  // 0 - 100 inclusive
     pub usb_powered: Watch<CriticalSectionRawMutex, bool, 2>,
     pub charging: Watch<CriticalSectionRawMutex, bool, 2>,
-    pub last_activity: AtomicU64,  // timestamp of last activity for power keep-alice
+    pub last_activity: AtomicU64,  // timestamp of last activity for power keep-alive
 }
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
