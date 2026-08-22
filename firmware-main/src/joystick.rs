@@ -91,7 +91,7 @@ pub(crate) async fn joystick_task(
             x: x_linear,
             y: y_linear,
             trig: I1F15::from_num(trig_linear),
-            btn: false, //btn_value,
+            btn: btn_value,
         };
         josytick_state_sender.send(joystick_state);
 
@@ -104,6 +104,8 @@ pub(crate) async fn btns_task(
     bus: &'static GlobalBus,
     expander: &'static SharedExpander
 ) {
+    let btns_snd = bus.buttons_state.sender();
+
     let mut ticker = Ticker::every(Duration::from_millis(20));
 
     loop {
@@ -111,20 +113,11 @@ pub(crate) async fn btns_task(
             let mut expander = expander.lock().await;
             expander.read_btns().await.unwrap_or(0)
         };
+        
+        btns_snd.send(btns);
 
         if btns != 0 {
             bus.activity(); // keep alive if buttons are being pressed
-        }
-
-        let rgb_val = if btns != 0 {
-            smart_leds::RGB8 { r: 15, g: 0, b: 15 }
-        } else {
-            smart_leds::RGB8 { r: 0, g: 0, b: 0 }
-        };
-        {
-            let mut expander = expander.lock().await;
-            expander.write_rgb(2, rgb_val).await.ok();
-            expander.update_rgb().await.ok();
         }
 
         ticker.next().await;

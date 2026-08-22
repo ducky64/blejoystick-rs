@@ -368,7 +368,10 @@ async fn joystick_task<C: Controller, P: PacketPool>(
     let mut x_accum = RelativeAccummulator::new(I16F16::from_num(63));
     let mut y_accum = RelativeAccummulator::new(I16F16::from_num(63));
 
+    let mut last_report = MouseReport::default();
+
     loop {
+        // handle joystick
         let joystick = joystick_reader.changed().await;
         let now = Instant::now();
         let dt = now - last_tick;
@@ -378,25 +381,34 @@ async fn joystick_task<C: Controller, P: PacketPool>(
         let x_delta = x_accum.update(sensitivity_mapping(joystick.x), dt);
         let y_delta = y_accum.update(sensitivity_mapping(joystick.y), dt);
 
+        // handle buttons
+        let mut report_buttons: u8 = 0;
+
+        if joystick.btn {
+            report_buttons |= 1 << 0; // left click
+        }
+
+        let btns = bus.buttons_state.try_get().unwrap_or(0);
+        if (btns & (1 << 1)) != 0 {
+            report_buttons |= 1 << 3; // back button
+        }
+        if (btns & (1 << 7)) != 0 {
+            report_buttons |= 1 << 4; // forward button
+        }
+
+        // assembe and send report
         let report = MouseReport {
-            buttons: if joystick.btn { 1 } else { 0 },
+            buttons: report_buttons,
             x: 0,
             y: 0,
             wheel: -y_delta - trig_delta,
             pan: x_delta,
         };
 
-        if report
-            == (MouseReport {
-                buttons: 0,
-                x: 0,
-                y: 0,
-                wheel: 0,
-                pan: 0,
-            })
-        {
+        if report == last_report && !report.relative_changed() {
             continue; // don't send reports if nothing changed
         }
+        last_report = report;
 
         let mut buf = [0u8; MouseReport::SIZE];
         report.serialize(&mut buf).unwrap();

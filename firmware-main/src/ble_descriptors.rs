@@ -23,15 +23,6 @@ pub(crate) struct BatteryService {
     pub(crate) level: u8,
 }
 
-// The characteristic buffer length for the descriptor must exactly match the descriptor length,
-// or it will crash when the BLE stack starts.
-// As of usbd-hid 0.9.0, the descriptor is not available at compiler time.
-// Workaround: get the length at runtime, then update the code
-// - in main, before the BLE stack starts (and crashes), print the length, for example
-//     info!("report length = {}",
-//         <ble_descriptors::MouseReport as usbd_hid::descriptor::SerializedDescriptor>::desc().len());
-// - paste the result into the characteristic buffer length
-
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = MOUSE) = {
         (collection = PHYSICAL, usage = POINTER) = {
@@ -70,6 +61,23 @@ pub struct MouseReport {
 impl MouseReport {
     pub const SIZE: usize = core::mem::size_of::<MouseReport>();
     pub const DESC_SIZE: usize = MouseReport::DESC.len(); //69; // IMPORTANT: length MUST EXACTLY equal the descriptor size, see note at top of file
+
+    /// returns true if the report in itself encodes a relative change
+    pub fn relative_changed(&self) -> bool {
+        self.x != 0 || self.y != 0 || self.wheel != 0 || self.pan != 0
+    }
+}
+
+impl Default for MouseReport {
+    fn default() -> Self {
+        MouseReport {
+            buttons: 0,
+            x: 0,
+            y: 0,
+            wheel: 0,
+            pan: 0,
+        }
+    }
 }
 
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]

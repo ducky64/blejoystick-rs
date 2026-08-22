@@ -76,6 +76,7 @@ pub struct GlobalBus {
     >,
 
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
+    pub buttons_state: Watch<CriticalSectionRawMutex, u8, 2>,  // bitmask of buttons
     pub vbat_mv: Watch<CriticalSectionRawMutex, u16, 2>,
     pub vbat_soc: Watch<CriticalSectionRawMutex, u8, 2>,  // 0 - 100 inclusive
     pub usb_powered: Watch<CriticalSectionRawMutex, bool, 2>,
@@ -96,6 +97,7 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
         storage: Mutex::new(storage),
 
         joystick_state: Watch::new(),
+        buttons_state: Watch::new(),
         vbat_mv: Watch::new(),
         vbat_soc: Watch::new(),
 
