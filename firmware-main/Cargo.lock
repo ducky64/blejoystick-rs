@@ -1142,6 +1142,8 @@ dependencies = [
 [[package]]
 name = "lsm6ds3trc"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1ef4618223801211ae08664f26478ae4c5446fbfba2c2e8d13736d0c175f950"
 dependencies = [
  "bilge",
  "defmt 1.0.1",
