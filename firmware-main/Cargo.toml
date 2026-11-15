@@ -11,6 +11,7 @@ path = "./src/main.rs"
 [dependencies]
 
 # Cargo.toml block from trouble nrf52 example
+# with these features added for trouble-host: "defmt", "security", "serde"
 
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "defmt", "executor-interrupt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime"] }
@@ -22,7 +23,7 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 nrf-sdc = { version = "0.4", default-features = false, features = ["defmt", "peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, features = ["defmt", "critical-section-impl", "nrf52840"] }
 bt-hci = { version = "0.10", default-features = false, features = ["defmt"] }
-trouble-host = { version = "0.8", default-features = false, features = ["derive", "gatt", "peripheral", "default-packet-pool"] }
+trouble-host = { version = "0.8", default-features = false, features = ["derive", "gatt", "peripheral", "default-packet-pool", "defmt", "security", "serde"] }
 
 defmt = "1.0"
 defmt-rtt = { version = "1.0", features=["disable-blocking-mode"] }
