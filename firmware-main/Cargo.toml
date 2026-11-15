@@ -66,6 +66,7 @@ lsm6ds3trc = { version = "0.1", features = ["defmt"] }
 smart-leds = "0.4.0"
 
 # application
+logic = { path = "../logic" }
 micromath = "2.1"
 
 [profile.dev]
