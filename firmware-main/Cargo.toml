@@ -21,7 +21,7 @@ embassy-sync = { version = "0.8", features = ["defmt"] }
 
 futures = { version = "0.3", default-features = false, features = ["async-await"]}
 nrf-sdc = { version = "0.4", default-features = false, features = ["defmt", "peripheral", "nrf52840"] }
-nrf-mpsl = { version = "0.3", default-features = false, features = ["defmt", "critical-section-impl", "nrf52840"] }
+nrf-mpsl = { version = "0.4", default-features = false, features = ["defmt", "critical-section-impl", "nrf52840"] }
 bt-hci = { version = "0.10", default-features = false, features = ["defmt"] }
 trouble-host = { version = "0.8", default-features = false, features = ["derive", "gatt", "peripheral", "default-packet-pool", "defmt", "security", "serde"] }
 
