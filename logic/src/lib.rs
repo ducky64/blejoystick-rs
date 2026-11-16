@@ -28,5 +28,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_scale_bipolar() {}
+    fn test_scale_bipolar() {
+        const CENTER: U0F16 = U0F16::lit("0.5");
+        const FULLSCALE: U0F16 = U0F16::lit("0.4");
+        const DEADZONE: U0F16 = U0F16::lit("0.0");
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.5"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.0")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.9"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::MAX
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.1"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::MIN
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.7"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.5")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.3"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("-0.5")
+        );
+
+        // saturation behavior
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.95"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::MAX
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.05"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::MIN
+        );
+    }
+
+    #[test]
+    fn test_scale_bipolar_deadzone() {
+        const CENTER: U0F16 = U0F16::lit("0.5");
+        const FULLSCALE: U0F16 = U0F16::lit("0.4");
+        const DEADZONE: U0F16 = U0F16::lit("0.1");
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.5"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.0")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.6"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.0")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.4"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.0")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::MAX, CENTER, FULLSCALE, DEADZONE),
+            I1F15::MAX
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::MIN, CENTER, FULLSCALE, DEADZONE),
+            I1F15::MIN
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.75"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("0.5")
+        );
+        assert_eq!(
+            scale_bipolar(U0F16::lit("0.25"), CENTER, FULLSCALE, DEADZONE),
+            I1F15::lit("-0.5")
+        );
+    }
 }
