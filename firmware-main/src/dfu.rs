@@ -4,9 +4,10 @@
 //! Flow (DFU 1.1): host runs `dfu-util -D app.bin -R` -> DFU_DETACH + USB reset on the application's
 //! run-time interface -> [`DetachHandler`] marks the state partition `DfuDetach` and resets ->
 //! the bootloader (firmware-bootloader/) enumerates in DFU mode and writes the image straight
-//! into ACTIVE (no A/B swap) -> USB reset -> the new image boots "on trial" and, once it has been
-//! running for [`MARK_BOOTED_DELAY`], calls `mark_booted`. If it resets before that (eg, panics,
-//! or hangs and the watchdog fires), the bootloader comes back up in DFU mode.
+//! into ACTIVE (no A/B swap) -> USB reset -> the new image boots "on trial" and, once the host has
+//! configured its USB DFU run-time interface (so it can take the next update), [`ConfirmHandler`]
+//! calls `mark_booted`. If it resets before that (eg, panics, hangs and the watchdog fires, or its
+//! USB never enumerates), the bootloader comes back up in DFU mode.
 
 use embassy_boot::{BlockingFirmwareState, State};
 use embassy_futures::select::{select, Either};
@@ -16,7 +17,7 @@ use embassy_nrf::wdt::Watchdog;
 use embassy_nrf::{peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
 use embassy_usb_dfu::{Reset, ResetImmediate};
@@ -30,9 +31,6 @@ use crate::Irqs;
 
 /// How often the watchdog (started by the bootloader, see [`wdt_config`]) is fed.
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
-
-/// How long a freshly downloaded image must run before it is confirmed.
-const MARK_BOOTED_DELAY: Duration = Duration::from_secs(5);
 
 /// wDetachTimeOut: how long after DFU_DETACH the host's USB reset still enters DFU mode.
 const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -54,6 +52,30 @@ impl dfu_runtime::Handler for DetachHandler {
         match state.mark_dfu() {
             Ok(()) => ResetImmediate.sys_reset(),
             Err(e) => error!("DFU: failed to mark DFU state: {}", e),
+        }
+    }
+}
+
+/// Confirms a trial image (state `DfuDetach`, set by the bootloader before booting a new image) once
+/// the host has configured the device, which proves the DFU run-time interface works.
+struct ConfirmHandler {
+    bus: &'static GlobalBus,
+}
+
+impl embassy_usb::Handler for ConfirmHandler {
+    fn configured(&mut self, configured: bool) {
+        if !configured {
+            return;
+        }
+        let mut buf = state_buffer();
+        let mut state = BlockingFirmwareState::new(state_partition(self.bus), &mut buf.0);
+        match state.get_state() {
+            Ok(State::Boot) => {}  // already confirmed
+            Ok(_) => match state.mark_booted() {
+                Ok(()) => info!("firmware: USB configured, image confirmed"),
+                Err(e) => error!("firmware: failed to mark booted: {}", e),
+            },
+            Err(e) => error!("firmware: failed to read boot state: {}", e),
         }
     }
 }
@@ -90,6 +112,9 @@ pub(crate) async fn usb_task(
         DFU_DETACH_TIMEOUT,
     ));
     dfu_runtime::usb_dfu(&mut builder, dfu_state, |_| {});
+
+    static CONFIRM_HANDLER: StaticCell<ConfirmHandler> = StaticCell::new();
+    builder.handler(CONFIRM_HANDLER.init(ConfirmHandler { bus }));
 
     let mut device = builder.build();
 
@@ -142,33 +167,5 @@ pub(crate) async fn wdt_task(wdt: Peri<'static, peripherals::WDT>) {
     loop {
         handle.pet();
         ticker.next().await;
-    }
-}
-
-/// Confirms the running image after it has been up for a while, so the bootloader won't revert it.
-#[embassy_executor::task]
-pub(crate) async fn mark_booted_task(bus: &'static GlobalBus) {
-    let mut buf = state_buffer();
-    let mut state = BlockingFirmwareState::new(state_partition(bus), &mut buf.0);
-
-    match state.get_state() {
-        Ok(State::Boot) => {
-            info!("firmware: booted confirmed image");
-            return;  // no need to re-confirm
-        },
-        // the bootloader marks a freshly downloaded image DfuDetach before booting it
-        Ok(State::DfuDetach) => info!("firmware: booted new image, on trial"),
-        Ok(state) => warn!("firmware: unexpected boot state: {:?}", state),
-        Err(e) => {
-            error!("firmware: failed to read boot state: {}", e);
-            return;
-        }
-    }
-
-    Timer::after(MARK_BOOTED_DELAY).await;
-
-    match state.mark_booted() {
-        Ok(()) => info!("firmware: image confirmed"),
-        Err(e) => error!("firmware: failed to mark booted: {}", e),
     }
 }

@@ -212,9 +212,6 @@ async fn main(spawner: Spawner) {
     let mut sdc_mem = sdc::Mem::<4720>::new();
     let sdc = unwrap!(build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem));
 
-    // everything is initialized, confirm the image if it was just swapped in by the bootloader
-    spawner.spawn(unwrap!(dfu::mark_booted_task(bus)));
-
     ble_peripheral::run(bus, sdc).await;
 }
 
