@@ -62,6 +62,11 @@ pub fn dfu_attributes() -> DfuAttributes {
     DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT
 }
 
+/// How long to wait after accepting DFU_DETACH before resetting, so the request's status stage
+/// completes and the host sees it succeed. The nRF52840 USBD completes the status stage in
+/// hardware and doesn't report when it's done, so this is a bound, not a signal.
+pub const DETACH_RESET_DELAY: core::time::Duration = core::time::Duration::from_millis(10);
+
 /// Scratch buffer for embassy-boot's state partition (one NVMC write word).
 pub type StateBuffer = AlignedBuffer<{ Nvmc::WRITE_SIZE }>;
 

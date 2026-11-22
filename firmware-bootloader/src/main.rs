@@ -33,7 +33,9 @@ use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
 use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, USB_SERIAL_DFU};
+use firmware_common::{
+    dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY, USB_SERIAL_DFU,
+};
 
 use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
 
@@ -143,8 +145,10 @@ fn run_dfu(
         }
     });
     block_on(select(device.run(), pet_wdt));
-    // let the hardware finish the DETACH status stage, so the host sees it succeed (~10 ms)
-    cortex_m::asm::delay(64_000_000 / 100);
+
+    // DFU_DETACH: let its status stage complete. The SysTick runs from the 64 MHz CPU clock.
+    let syst = defmt::unwrap!(cortex_m::Peripherals::take()).SYST;
+    cortex_m::delay::Delay::new(syst, 64_000_000).delay_us(DETACH_RESET_DELAY.as_micros() as u32);
     cortex_m::peripheral::SCB::sys_reset()
 }
 

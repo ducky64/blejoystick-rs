@@ -21,7 +21,7 @@ use embassy_sync::watch;
 use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
@@ -35,10 +35,6 @@ const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
 /// wDetachTimeOut. With WILL_DETACH the host doesn't reset the device after DFU_DETACH, so this is
 /// only reported to it.
 const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(1000);
-
-/// How long the USB device keeps running after DFU_DETACH before the reset, so the request's status
-/// stage completes and the host sees it succeed.
-const DFU_DETACH_DELAY: Duration = Duration::from_millis(10);
 
 /// Signalled by [`DetachHandler`] once the state is marked, see [`run_usb_session`].
 static DETACH: Signal<CriticalSectionRawMutex, ()> = Signal::new();
@@ -158,7 +154,8 @@ async fn run_usb_session(
     };
     let detach_fut = async {
         DETACH.wait().await;
-        Timer::after(DFU_DETACH_DELAY).await; // with the USB device still running
+        // with the USB device still running, so the DFU_DETACH status stage completes
+        Timer::after(unwrap!(DETACH_RESET_DELAY.try_into())).await;
     };
     match select3(usb_fut, detach_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
         Either3::First(never) => never,
