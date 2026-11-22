@@ -520,9 +520,7 @@ dependencies = [
  "embassy-boot",
  "embassy-embedded-hal",
  "embassy-nrf",
- "embassy-sync",
  "embassy-usb",
- "embedded-storage",
 ]
 
 [[package]]

@@ -14,6 +14,3 @@ __bootloader_state_end = ORIGIN(BOOTLOADER_STATE) + LENGTH(BOOTLOADER_STATE);
 
 __bootloader_active_start = ORIGIN(ACTIVE);
 __bootloader_active_end = ORIGIN(ACTIVE) + LENGTH(ACTIVE);
-
-__ram_start = ORIGIN(RAM);
-__ram_end = ORIGIN(RAM) + LENGTH(RAM);

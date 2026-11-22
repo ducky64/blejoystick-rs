@@ -14,16 +14,9 @@
 
 #![no_std]
 
-use core::cell::RefCell;
-use core::ops::Range;
-
 use embassy_boot::AlignedBuffer;
-use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig};
-use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_sync::blocking_mutex::Mutex;
-use embedded_storage::nor_flash::NorFlash;
 
 /// Watchdog configuration. The bootloader starts the watchdog, and the application takes it over,
 /// which only works with an identical configuration.
@@ -59,32 +52,22 @@ pub const fn state_buffer() -> StateBuffer {
     AlignedBuffer([0; Nvmc::WRITE_SIZE])
 }
 
-/// A region of a shared flash, addressed relative to the start of the region.
+/// The flash partition for a region defined by a pair of linker symbols `$start`/`$end` in memory.x.
 ///
-/// `range` is in flash addresses, which on the nRF52 are also NVMC offsets (flash starts at 0).
-pub fn partition<M: RawMutex, F: NorFlash>(
-    flash: &Mutex<M, RefCell<F>>,
-    range: Range<u32>,
-) -> BlockingPartition<'_, M, F> {
-    BlockingPartition::new(flash, range.start, range.end - range.start)
-}
-
-/// The address range `start..end` of a pair of linker symbols defined in memory.x.
+/// The symbols are flash addresses, which on the nRF52 are also NVMC offsets (flash starts at 0),
+/// so the partition's `offset()` is the region's address.
 #[macro_export]
-macro_rules! linker_range {
-    ($start:ident, $end:ident) => {{
+macro_rules! linker_partition {
+    ($flash:expr, $start:ident, $end:ident) => {{
         unsafe extern "C" {
             static $start: u32;
             static $end: u32;
         }
-        unsafe { (&raw const $start as u32)..(&raw const $end as u32) }
+        let start = unsafe { &raw const $start } as u32;
+        let end = unsafe { &raw const $end } as u32;
+        $crate::BlockingPartition::new($flash, start, end - start)
     }};
 }
 
-/// The flash partition for a region defined by a pair of linker symbols in memory.x.
-#[macro_export]
-macro_rules! linker_partition {
-    ($flash:expr, $start:ident, $end:ident) => {
-        $crate::partition($flash, $crate::linker_range!($start, $end))
-    };
-}
+#[doc(hidden)]
+pub use embassy_embedded_hal::flash::partition::BlockingPartition;
