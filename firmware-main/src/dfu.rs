@@ -1,9 +1,9 @@
 //! Firmware update support: the USB DFU run-time interface, the bootloader watchdog, and
 //! confirming a freshly downloaded image.
 //!
-//! Flow (DFU 1.1, see [`firmware_common::dfu_attributes`]): host runs `dfu-util -D app.bin -R` ->
-//! DFU_DETACH, then the host's USB reset within wDetachTimeOut (the device does not detach by
-//! itself, no WILL_DETACH) on the application's run-time interface -> [`DetachHandler`] marks the state partition `DfuDetach` and resets ->
+//! Flow (DFU 1.1): host runs `dfu-util -D app.bin -R` -> DFU_DETACH on the application's run-time
+//! interface, which has WILL_DETACH set, so the device detaches by itself (no USB reset needed) ->
+//! [`DetachHandler`] marks the state partition `DfuDetach` and the device resets ->
 //! the bootloader (firmware-bootloader/) enumerates in DFU mode and writes the image straight
 //! into ACTIVE (no A/B swap) -> USB reset -> the new image boots "on trial" and, once the host has
 //! configured its USB DFU run-time interface (so it can take the next update), [`ConfirmHandler`]
@@ -11,17 +11,17 @@
 //! USB never enumerates), the bootloader comes back up in DFU mode.
 
 use embassy_boot::{BlockingFirmwareState, State};
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either3};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::wdt::Watchdog;
 use embassy_nrf::{peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_sync::watch;
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
-use embassy_usb_dfu::application::{self as dfu_runtime, DfuState};
-use embassy_usb_dfu::{Reset, ResetImmediate};
+use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
 use firmware_common::{dfu_attributes, linker_partition, state_buffer, usb_config, wdt_config};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
@@ -33,15 +33,25 @@ use crate::Irqs;
 /// How often the watchdog (started by the bootloader, see [`wdt_config`]) is fed.
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
 
-/// wDetachTimeOut: how long after DFU_DETACH the host's USB reset still enters DFU mode. Generous,
-/// since a reset by port cycle (eg, on Windows) can take over a second.
-const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(5000);
+/// wDetachTimeOut. With WILL_DETACH the host doesn't reset the device after DFU_DETACH, so this is
+/// only reported to it.
+const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(1000);
+
+/// How long the USB device keeps running after DFU_DETACH before the reset, so the request's status
+/// stage completes and the host sees it succeed.
+const DFU_DETACH_DELAY: Duration = Duration::from_millis(10);
+
+/// Signalled by [`DetachHandler`] once the state is marked, see [`run_usb_session`].
+static DETACH: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 fn state_partition(bus: &'static GlobalBus) -> FlashPartition {
     linker_partition!(bus.flash, __bootloader_state_start, __bootloader_state_end)
 }
 
-/// DFU run-time handler: on DFU_DETACH followed by a USB reset, reboot into the bootloader's DFU mode.
+/// DFU run-time handler: on DFU_DETACH (WILL_DETACH), reboot into the bootloader's DFU mode.
+///
+/// Called from within the DETACH request, so it only marks the state and leaves the reset to
+/// [`run_usb_session`], after the request has been answered.
 struct DetachHandler {
     bus: &'static GlobalBus,
 }
@@ -51,10 +61,7 @@ impl dfu_runtime::Handler for DetachHandler {
         let mut buf = state_buffer();
         let mut state = BlockingFirmwareState::new(state_partition(self.bus), &mut buf.0);
         match state.mark_dfu() {
-            Ok(()) => {
-                info!("DFU: detach + USB reset, resetting into bootloader DFU mode");
-                ResetImmediate.sys_reset()
-            }
+            Ok(()) => DETACH.signal(()),
             Err(e) => error!("DFU: failed to mark DFU state, staying in run-time mode: {}", e),
         }
     }
@@ -112,7 +119,7 @@ pub(crate) async fn usb_task(
     static DFU_STATE: StaticCell<DfuState<DetachHandler>> = StaticCell::new();
     let dfu_state = DFU_STATE.init(DfuState::new(
         DetachHandler { bus },
-        dfu_attributes(),
+        dfu_attributes() | DfuAttributes::WILL_DETACH,
         DFU_DETACH_TIMEOUT,
     ));
     dfu_runtime::usb_dfu(&mut builder, dfu_state, |_| {});
@@ -131,7 +138,8 @@ pub(crate) async fn usb_task(
 
 type UsbPoweredReceiver = watch::Receiver<'static, CriticalSectionRawMutex, bool, 2>;
 
-/// Runs the USB device for one VBUS-present session, returning once VBUS is removed.
+/// Runs the USB device for one VBUS-present session, returning once VBUS is removed, or resetting
+/// into the bootloader on DFU_DETACH.
 /// The HFCLK is held for the duration of the session and released on return.
 async fn run_usb_session(
     mpsl: &'static MultiprotocolServiceLayer<'static>,
@@ -149,9 +157,17 @@ async fn run_usb_session(
             device.wait_resume().await;
         }
     };
-    match select(usb_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
-        Either::First(never) => never,
-        Either::Second(_) => {
+    let detach_fut = async {
+        DETACH.wait().await;
+        Timer::after(DFU_DETACH_DELAY).await; // with the USB device still running
+    };
+    match select3(usb_fut, detach_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
+        Either3::First(never) => never,
+        Either3::Second(()) => {
+            info!("DFU: detach, resetting into bootloader DFU mode");
+            cortex_m::peripheral::SCB::sys_reset()
+        }
+        Either3::Third(_) => {
             info!("USB: VBUS removed, stopping USB device");
             Ok(())
         }
