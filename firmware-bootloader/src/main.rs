@@ -1,37 +1,145 @@
-//! Minimal swap bootloader, based on embassy's examples/boot/bootloader/nrf.
+//! Single-slot bootloader with USB DFU (DFU 1.1 DFU mode), built from embassy-boot and embassy-usb-dfu.
+//!
+//! The application exposes only the DFU run-time interface. On DFU_DETACH it marks the state
+//! partition `DfuDetach` and resets into this bootloader, which enumerates as a DFU-mode device and
+//! streams the new image straight into ACTIVE. See `overwrite.rs` for the state machine.
 #![no_std]
 #![no_main]
 
+mod overwrite;
+
 use core::cell::RefCell;
+use core::future::poll_fn;
+use core::task::Poll;
 
 use cortex_m_rt::{entry, exception};
 use defmt_rtt as _;
-use embassy_boot_nrf::*;
+use embassy_boot_nrf::{BlockingFirmwareState, BlockingFirmwareUpdater, BootLoader, FirmwareUpdaterConfig};
+use embassy_embedded_hal::flash::partition::BlockingPartition;
+use embassy_futures::block_on;
+use embassy_futures::select::select;
 use embassy_nrf::nvmc::Nvmc;
-use embassy_nrf::wdt::{self, HaltConfig, SleepConfig};
+use embassy_nrf::usb::vbus_detect::{self, HardwareVbusDetect};
+use embassy_nrf::usb::{self, Driver};
+use embassy_nrf::wdt::{Watchdog, WatchdogHandle};
+use embassy_nrf::{bind_interrupts, pac, peripherals, Peri};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_usb::class::dfu::consts::DfuAttributes;
+use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
+use embassy_usb_dfu::dfu::FirmwareHandler;
+use embassy_usb_dfu::ResetImmediate;
+use embedded_storage::nor_flash::NorFlash;
+use firmware_common::{linker_partition, state_buffer, usb_config, wdt_config};
 
-/// Watchdog configuration, must match `firmware-main/src/dfu.rs`: WDT_CONFIG,
-/// otherwise the application cannot take over the running watchdog.
-const WDT_TIMEOUT_TICKS: u32 = 32768 * 5; // 5 seconds
+use crate::overwrite::{Action, OverwriteDfuHandler, UsbResetHandler};
+
+/// DFU transfer size (wTransferSize), one flash page.
+const DFU_BLOCK_SIZE: usize = Nvmc::ERASE_SIZE;
+
+bind_interrupts!(struct Irqs {
+    USBD => usb::InterruptHandler<peripherals::USBD>;
+    CLOCK_POWER => vbus_detect::InterruptHandler;
+});
+
+type SharedFlash = Mutex<NoopRawMutex, RefCell<Nvmc<'static>>>;
+type FlashPartition<'a> = BlockingPartition<'a, NoopRawMutex, Nvmc<'static>>;
+
+fn state_partition(flash: &SharedFlash) -> FlashPartition<'_> {
+    linker_partition!(flash, __bootloader_state_start, __bootloader_state_end)
+}
+
+/// The application image, also where it executes from (its `offset()` is its address).
+fn active_partition(flash: &SharedFlash) -> FlashPartition<'_> {
+    linker_partition!(flash, __bootloader_active_start, __bootloader_active_end)
+}
 
 #[entry]
 fn main() -> ! {
     let p = embassy_nrf::init(Default::default());
 
-    let mut wdt_config = wdt::Config::default();
-    wdt_config.timeout_ticks = WDT_TIMEOUT_TICKS;
-    wdt_config.action_during_sleep = SleepConfig::Run;
-    wdt_config.action_during_debug_halt = HaltConfig::Pause;
+    // survives soft resets, so it may already be running (with this config)
+    let (_wdt, [mut wdt]) = match Watchdog::try_new(p.WDT, wdt_config()) {
+        Ok(x) => x,
+        Err(_) => {
+            defmt::error!("WDT: already running with a different config, waiting for reset");
+            loop {
+                cortex_m::asm::wfe();
+            }
+        }
+    };
 
-    let flash = WatchdogFlash::start(Nvmc::new(p.NVMC), p.WDT, wdt_config);
-    let flash = Mutex::new(RefCell::new(flash));
+    let flash: SharedFlash = Mutex::new(RefCell::new(Nvmc::new(p.NVMC)));
+    let action = {
+        let mut buf = state_buffer();
+        let mut state = BlockingFirmwareState::new(state_partition(&flash), &mut buf.0);
+        overwrite::decide(&mut state)
+    };
 
-    let config = BootLoaderConfig::from_linkerfile_blocking(&flash, &flash, &flash);
-    let active_offset = config.active.offset();
-    let bl: BootLoader = BootLoader::prepare(config);
+    match action {
+        Action::Boot => {
+            wdt.pet();
+            let bl: BootLoader = BootLoader;
+            unsafe { bl.load(active_partition(&flash).offset()) }
+        }
+        Action::Dfu => run_dfu(p.USBD, &flash, wdt),
+    }
+}
 
-    unsafe { bl.load(active_offset) }
+/// Runs USB DFU until the device resets: after a completed download (on the host's USB reset),
+/// or on a second download attempt. Never jumps to the application, so the clocks and peripherals
+/// set up here never leak into it.
+fn run_dfu(
+    usbd: Peri<'static, peripherals::USBD>,
+    flash: &SharedFlash,
+    mut wdt: WatchdogHandle,
+) -> ! {
+    defmt::info!("DFU: entering DFU mode");
+
+    // USBD needs the HFXO. There's no MPSL in the bootloader, so start it directly.
+    let clock = pac::CLOCK;
+    clock.events_hfclkstarted().write_value(0);
+    clock.tasks_hfclkstart().write_value(1);
+    while clock.events_hfclkstarted().read() == 0 {}
+
+    // everything the USB device borrows, declared before it
+    let mut config_desc = [0u8; 256];
+    let mut bos_desc = [0u8; 256];
+    let mut msos_desc = [0u8; 0];
+    let mut control_buf = [0u8; DFU_BLOCK_SIZE]; // must fit a whole DFU_DNLOAD block
+    let mut updater_buf = state_buffer();
+    let mut state_buf = state_buffer();
+    let mut reset_handler = UsbResetHandler(ResetImmediate);
+
+    // embassy-boot's updater, with ACTIVE as its "DFU" partition: the image is written in place
+    let updater = BlockingFirmwareUpdater::new(
+        FirmwareUpdaterConfig {
+            dfu: active_partition(flash),
+            state: state_partition(flash),
+        },
+        &mut updater_buf.0,
+    );
+    let state = BlockingFirmwareState::new(state_partition(flash), &mut state_buf.0);
+    let mut dfu_state = DfuState::new(
+        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state, ResetImmediate),
+        DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT,
+    );
+
+    let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
+    // same VID/PID as the application's run-time interface, so dfu-util follows the device across the detach
+    let config = usb_config("blejoystick-rs bootloader");
+    let mut builder = embassy_usb::Builder::new(driver, config, &mut config_desc, &mut bos_desc, &mut msos_desc, &mut control_buf);
+    dfu_mode::usb_dfu(&mut builder, &mut dfu_state, DFU_BLOCK_SIZE, |_| {});
+    builder.handler(&mut reset_handler);
+    let mut device = builder.build();
+
+    // block_on busy-polls, so this feeds the watchdog continuously while USB is idle
+    let pet_wdt = poll_fn(|_| {
+        wdt.pet();
+        Poll::<()>::Pending
+    });
+    block_on(select(device.run(), pet_wdt));
+    cortex_m::peripheral::SCB::sys_reset()
 }
 
 #[unsafe(no_mangle)]
