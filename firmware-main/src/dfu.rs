@@ -96,7 +96,7 @@ pub(crate) async fn usb_task(
     let mut usb_powered_rcv = unwrap!(bus.usb_powered.receiver());
     loop {
         usb_powered_rcv.changed_and(|powered| *powered).await;
-        run_usb_session(mpsl, &mut device, &mut usb_powered_rcv).await.ok()
+        run_usb_session(mpsl, &mut device, &mut usb_powered_rcv).await.ok();
     }
 }
 

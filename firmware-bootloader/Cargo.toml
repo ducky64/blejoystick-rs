@@ -19,6 +19,7 @@ embassy-sync = "0.8"
 embassy-usb = { version = "0.6", default-features = false, features = ["defmt"] }
 embassy-usb-dfu = { version = "0.3", features = ["dfu", "cortex-m", "defmt"] }
 embedded-storage = "0.3"
+firmware-common = { path = "../firmware-common" }
 
 cortex-m = { version = "0.7.6", features = [
   "inline-asm",
