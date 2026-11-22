@@ -53,6 +53,12 @@ rand_chacha = { version = "0.3", default-features = false }
 portable-atomic = "1"
 
 embassy-embedded-hal = "0.6.0"
+
+# bootloader / USB DFU
+embassy-boot = { version = "0.7", features = ["defmt"] }
+embassy-usb = { version = "0.6", features = ["defmt"] }
+embassy-usb-dfu = { version = "0.3", features = ["dfu", "cortex-m", "defmt"] }
+embedded-storage = "0.3"
 # peripherals
 # embedded-hal = "1.0"
 embedded-hal-async = "1.0"
