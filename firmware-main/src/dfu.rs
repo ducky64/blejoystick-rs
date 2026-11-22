@@ -1,11 +1,14 @@
 //! Firmware update support: USB DFU (in-application download), the bootloader watchdog,
 //! and confirming a freshly swapped image.
 //!
-//! Flow: host runs `dfu-util -D app.bin` -> the DFU class writes the image into the DFU
-//! partition and marks the state partition as "swap" -> reset -> the bootloader
+//! Flow: host runs `dfu-util -D app.bin -R` -> the DFU class writes the image into the DFU
+//! partition and marks the state partition as "swap" -> the device returns to dfuIDLE
+//! (manifestation tolerant) -> host issues a USB reset -> system reset -> the bootloader
 //! (firmware-bootloader/) swaps ACTIVE and DFU -> new image boots and, once it has been
 //! running for [`MARK_BOOTED_DELAY`], calls `mark_booted`. If it resets before that
 //! (eg, hangs and the watchdog fires), the bootloader reverts to the previous image.
+
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_boot::{AlignedBuffer, BlockingFirmwareState, BlockingFirmwareUpdater, FirmwareUpdaterConfig, State};
 use embassy_futures::select::{select, Either};
@@ -21,7 +24,7 @@ use embassy_usb::class::dfu::consts::{DfuAttributes, Status};
 use embassy_usb::class::dfu::dfu_mode::{self, DfuState, Handler};
 use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb::UsbDevice;
-use embassy_usb_dfu::ResetImmediate;
+use embassy_usb_dfu::{Reset, ResetImmediate};
 use embedded_storage::nor_flash::NorFlash;
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
@@ -34,6 +37,10 @@ use crate::Irqs;
 /// running watchdog (which cannot be stopped or reconfigured) cannot be taken over.
 const WDT_TIMEOUT_TICKS: u32 = 32768 * 5; // 5 seconds
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Set once a complete image is written and marked for swap. The next USB bus reset from the
+/// host then performs a system reset into the bootloader (DFU 1.1, manifestation tolerant).
+static SWAP_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// How long a freshly swapped image must run before it is confirmed.
 const MARK_BOOTED_DELAY: Duration = Duration::from_secs(5);
@@ -84,12 +91,29 @@ impl Handler for DfuHandler {
 
     fn finish(&mut self) -> Result<(), Status> {
         info!("DFU: download complete, {} bytes", self.bytes);
-        self.inner.finish()
+        let result = self.inner.finish();
+        if result.is_ok() {
+            SWAP_PENDING.store(true, Ordering::Release);
+        }
+        result
     }
 
     fn system_reset(&mut self) {
         info!("DFU: resetting into bootloader");
         self.inner.system_reset()
+    }
+}
+
+/// Performs the system reset into the bootloader on the host's USB reset after a completed
+/// download. The DFU class only does this itself in the (non-tolerant) manifestation states.
+struct UsbResetHandler;
+
+impl embassy_usb::Handler for UsbResetHandler {
+    fn reset(&mut self) {
+        if SWAP_PENDING.load(Ordering::Acquire) {
+            info!("DFU: USB reset with swap pending, resetting into bootloader");
+            ResetImmediate.sys_reset();
+        }
     }
 }
 
@@ -132,9 +156,13 @@ pub(crate) async fn usb_task(
             bus,
             bytes: 0,
         },
-        DfuAttributes::CAN_DOWNLOAD,
+        // Manifestation tolerant: returns to dfuIDLE on completion and the host's USB reset ends the session.
+        DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT,
     ));
     dfu_mode::usb_dfu(&mut builder, dfu_state, DFU_BLOCK_SIZE, |_| {});
+
+    static USB_RESET_HANDLER: StaticCell<UsbResetHandler> = StaticCell::new();
+    builder.handler(USB_RESET_HANDLER.init(UsbResetHandler));
 
     let mut device = builder.build();
 
