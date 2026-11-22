@@ -17,6 +17,7 @@
 use embassy_boot::AlignedBuffer;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig};
+use embedded_storage::nor_flash::NorFlash;
 
 /// Watchdog configuration. The bootloader starts the watchdog, and the application takes it over,
 /// which only works with an identical configuration.
