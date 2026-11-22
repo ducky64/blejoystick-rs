@@ -8,12 +8,11 @@
 //! running for [`MARK_BOOTED_DELAY`], calls `mark_booted`. If it resets before that (eg, panics,
 //! or hangs and the watchdog fires), the bootloader comes back up in DFU mode.
 
-use embassy_boot::{AlignedBuffer, BlockingFirmwareState, State};
+use embassy_boot::{BlockingFirmwareState, State};
 use embassy_futures::select::{select, Either};
-use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
-use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog};
+use embassy_nrf::wdt::Watchdog;
 use embassy_nrf::{peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch;
@@ -21,17 +20,15 @@ use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
 use embassy_usb_dfu::{Reset, ResetImmediate};
-use embedded_storage::nor_flash::NorFlash;
+use firmware_common::{linker_partition, state_buffer, usb_config, wdt_config};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
-use crate::bus::{linker_partition, FlashPartition, GlobalBus};
+use crate::bus::{FlashPartition, GlobalBus};
 use crate::prelude::*;
 use crate::Irqs;
 
-/// Watchdog configuration, must match firmware-bootloader/src/main.rs, otherwise the
-/// running watchdog (which cannot be stopped or reconfigured) cannot be taken over.
-const WDT_TIMEOUT_TICKS: u32 = 32768 * 5; // 5 seconds
+/// How often the watchdog (started by the bootloader, see [`wdt_config`]) is fed.
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How long a freshly downloaded image must run before it is confirmed.
@@ -39,12 +36,6 @@ const MARK_BOOTED_DELAY: Duration = Duration::from_secs(5);
 
 /// wDetachTimeOut: how long after DFU_DETACH the host's USB reset still enters DFU mode.
 const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(1000);
-
-const USB_VID: u16 = 0x1209; // pid.codes
-const USB_PID: u16 = 0x0001; // pid.codes test PID, TODO allocate a real one
-
-/// The embassy-boot state uses one STATE::WRITE_SIZE scratch buffer.
-type StateBuffer = AlignedBuffer<{ Nvmc::WRITE_SIZE }>;
 
 fn state_partition(bus: &'static GlobalBus) -> FlashPartition {
     linker_partition!(bus.flash, __bootloader_state_start, __bootloader_state_end)
@@ -58,7 +49,7 @@ struct DetachHandler {
 impl dfu_runtime::Handler for DetachHandler {
     fn enter_dfu(&mut self) {
         info!("DFU: detach, resetting into bootloader DFU mode");
-        let mut buf: StateBuffer = AlignedBuffer([0; Nvmc::WRITE_SIZE]);
+        let mut buf = state_buffer();
         let mut state = BlockingFirmwareState::new(state_partition(self.bus), &mut buf.0);
         match state.mark_dfu() {
             Ok(()) => ResetImmediate.sys_reset(),
@@ -77,11 +68,7 @@ pub(crate) async fn usb_task(
     // VBUS is reported in software by charger_task, since the POWER interrupt belongs to the MPSL
     let driver = Driver::new(usbd, Irqs, &bus.vbus);
 
-    let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
-    config.manufacturer = Some("blejoystick-rs");
-    config.product = Some("blejoystick-rs");
-    config.serial_number = None;
-    config.max_power = 100;
+    let config = usb_config("blejoystick-rs");
 
     static CONFIG_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
@@ -142,12 +129,7 @@ async fn run_usb_session(
 /// Takes over and feeds the watchdog started by the bootloader.
 #[embassy_executor::task]
 pub(crate) async fn wdt_task(wdt: Peri<'static, peripherals::WDT>) {
-    let mut config = wdt::Config::default();
-    config.timeout_ticks = WDT_TIMEOUT_TICKS;
-    config.action_during_sleep = SleepConfig::Run;
-    config.action_during_debug_halt = HaltConfig::Pause;
-
-    let (_wdt, [mut handle]) = match Watchdog::try_new(wdt, config) {
+    let (_wdt, [mut handle]) = match Watchdog::try_new(wdt, wdt_config()) {
         Ok(x) => x,
         Err(_) => {
             // running with a different configuration, nothing we can do but let it reset us
@@ -166,7 +148,7 @@ pub(crate) async fn wdt_task(wdt: Peri<'static, peripherals::WDT>) {
 /// Confirms the running image after it has been up for a while, so the bootloader won't revert it.
 #[embassy_executor::task]
 pub(crate) async fn mark_booted_task(bus: &'static GlobalBus) {
-    let mut buf: StateBuffer = AlignedBuffer([0; Nvmc::WRITE_SIZE]);
+    let mut buf = state_buffer();
     let mut state = BlockingFirmwareState::new(state_partition(bus), &mut buf.0);
 
     match state.get_state() {

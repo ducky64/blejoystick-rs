@@ -73,6 +73,7 @@ smart-leds = "0.4.0"
 
 # application
 logic = { path = "../logic" }
+firmware-common = { path = "../firmware-common" }
 micromath = "2.1"
 
 [profile.dev]

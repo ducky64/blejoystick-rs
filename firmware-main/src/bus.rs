@@ -75,20 +75,6 @@ pub type SharedFlash = blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Nv
 /// A region of the shared flash, addressed relative to the start of the region.
 pub type FlashPartition = BlockingPartition<'static, CriticalSectionRawMutex, Nvmc<'static>>;
 
-/// Returns the flash partition for a region defined by a pair of linker symbols in memory.x.
-macro_rules! linker_partition {
-    ($flash:expr, $start:ident, $end:ident) => {{
-        unsafe extern "C" {
-            static $start: u32;
-            static $end: u32;
-        }
-        let start = unsafe { &$start as *const u32 as u32 };
-        let end = unsafe { &$end as *const u32 as u32 };
-        $crate::bus::FlashPartition::new($flash, start, end - start)
-    }};
-}
-pub(crate) use linker_partition;
-
 pub struct GlobalBus {
     pub flash: &'static SharedFlash,
 
@@ -121,7 +107,7 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
     let flash: &'static SharedFlash = FLASH.init(blocking_mutex::Mutex::new(RefCell::new(flash)));
 
     // STORAGE region from memory.x, unchanged from the pre-bootloader layout (0xFE000..0x100000)
-    let storage_partition = linker_partition!(flash, __storage_start, __storage_end);
+    let storage_partition = firmware_common::linker_partition!(flash, __storage_start, __storage_end);
     let storage_size = storage_partition.size();
     let storage = MapStorage::<StorageKey, _, _>::new(
         BlockingAsync::new(storage_partition),

@@ -9,9 +9,9 @@ MEMORY
   RAM              : ORIGIN = 0x20000000, LENGTH = 256K
 }
 
-/* offsets relative to start of flash, used by embassy-boot */
-__bootloader_state_start = ORIGIN(BOOTLOADER_STATE) - ORIGIN(BOOTLOADER);
-__bootloader_state_end = ORIGIN(BOOTLOADER_STATE) + LENGTH(BOOTLOADER_STATE) - ORIGIN(BOOTLOADER);
+/* flash addresses (flash starts at 0, so these are also NVMC offsets), same convention as firmware-bootloader/memory.x */
+__bootloader_state_start = ORIGIN(BOOTLOADER_STATE);
+__bootloader_state_end = ORIGIN(BOOTLOADER_STATE) + LENGTH(BOOTLOADER_STATE);
 
-__storage_start = ORIGIN(STORAGE) - ORIGIN(BOOTLOADER);
-__storage_end = ORIGIN(STORAGE) + LENGTH(STORAGE) - ORIGIN(BOOTLOADER);
+__storage_start = ORIGIN(STORAGE);
+__storage_end = ORIGIN(STORAGE) + LENGTH(STORAGE);
