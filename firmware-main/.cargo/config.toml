@@ -9,3 +9,10 @@ target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
+
+[alias]
+attach = [
+  "run",
+  "--config",
+  "target.thumbv7em-none-eabihf.runner = 'probe-rs attach --chip nRF52840_xxAA --speed 16000'",
+]
