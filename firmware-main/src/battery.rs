@@ -107,7 +107,7 @@ pub(crate) async fn charger_task(
             bus.vbus.detected(vbus_present);
         }
         if vbus_present && usbregstatus.outputrdy() {
-            bus.vbus.ready();
+            bus.vbus.ready();  // must happen after detected
         }
         if vbus_present {
             bus.activity();  // keep alive if USB power present
