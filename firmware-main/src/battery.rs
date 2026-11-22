@@ -99,9 +99,15 @@ pub(crate) async fn charger_task(
 
     let mut ticker = Ticker::every(Duration::from_millis(250));
     loop {
-        let vbus_present = embassy_nrf::pac::POWER.usbregstatus().read().vbusdetect();
+        // polled instead of using POWER events, since the CLOCK_POWER interrupt belongs to the MPSL
+        let usbregstatus = embassy_nrf::pac::POWER.usbregstatus().read();
+        let vbus_present = usbregstatus.vbusdetect();
         if bus.usb_powered.try_get().map(|x| x != vbus_present).unwrap_or(true) {
             usb_powered_snd.send(vbus_present);
+            bus.vbus.detected(vbus_present);
+        }
+        if vbus_present && usbregstatus.outputrdy() {
+            bus.vbus.ready();
         }
         if vbus_present {
             bus.activity();  // keep alive if USB power present
