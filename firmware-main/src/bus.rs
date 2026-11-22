@@ -1,9 +1,12 @@
+use core::cell::RefCell;
 use core::sync::atomic::Ordering;
 
 use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_nrf::nvmc::Nvmc;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch, semaphore::GreedySemaphore};
+use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
+use embassy_sync::{blocking_mutex, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch, semaphore::GreedySemaphore};
 use fixed::types::I1F15;
 use portable_atomic::{AtomicU64};
 use sequential_storage::{
@@ -65,12 +68,35 @@ impl Key for StorageKey {
     }
 }
 
+/// The internal flash, shared between persistent storage and the firmware updater.
+/// All flash operations are blocking, so this lock is never held across an await.
+pub type SharedFlash = blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Nvmc<'static>>>;
+
+/// A region of the shared flash, addressed relative to the start of the region.
+pub type FlashPartition = BlockingPartition<'static, CriticalSectionRawMutex, Nvmc<'static>>;
+
+/// Returns the flash partition for a region defined by a pair of linker symbols in memory.x.
+macro_rules! linker_partition {
+    ($flash:expr, $start:ident, $end:ident) => {{
+        unsafe extern "C" {
+            static $start: u32;
+            static $end: u32;
+        }
+        let start = unsafe { &$start as *const u32 as u32 };
+        let end = unsafe { &$end as *const u32 as u32 };
+        $crate::bus::FlashPartition::new($flash, start, end - start)
+    }};
+}
+pub(crate) use linker_partition;
+
 pub struct GlobalBus {
+    pub flash: &'static SharedFlash,
+
     pub storage: Mutex<
         CriticalSectionRawMutex,
         MapStorage<
             StorageKey,
-            BlockingAsync<Nvmc<'static>>,
+            BlockingAsync<FlashPartition>,
             Cache<Uncached, Uncached, Uncached, StorageKey>,
         >,
     >,
@@ -80,6 +106,7 @@ pub struct GlobalBus {
     pub vbat_mv: Watch<CriticalSectionRawMutex, u16, 2>,
     pub vbat_soc: Watch<CriticalSectionRawMutex, u8, 2>,  // 0 - 100 inclusive
     pub usb_powered: Watch<CriticalSectionRawMutex, bool, 2>,
+    pub vbus: SoftwareVbusDetect,  // VBUS state for the USB driver, fed by charger_task
     pub charging: Watch<CriticalSectionRawMutex, bool, 2>,
     pub last_activity: AtomicU64,  // timestamp of last activity for power keep-alive
 
@@ -88,15 +115,22 @@ pub struct GlobalBus {
 }
 
 static BUS: StaticCell<GlobalBus> = StaticCell::new();
+static FLASH: StaticCell<SharedFlash> = StaticCell::new();
 
 pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
+    let flash: &'static SharedFlash = FLASH.init(blocking_mutex::Mutex::new(RefCell::new(flash)));
+
+    // STORAGE region from memory.x, unchanged from the pre-bootloader layout (0xFE000..0x100000)
+    let storage_partition = linker_partition!(flash, __storage_start, __storage_end);
+    let storage_size = storage_partition.size();
     let storage = MapStorage::<StorageKey, _, _>::new(
-        BlockingAsync::new(flash),
-        const { MapConfig::new(0x000F_E000..0x0010_0000) },
+        BlockingAsync::new(storage_partition),
+        MapConfig::new(0..storage_size),
         Cache::new_uncached(),
     );
 
     BUS.init(GlobalBus {
+        flash,
         storage: Mutex::new(storage),
 
         joystick_state: Watch::new(),
@@ -105,6 +139,7 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
         vbat_soc: Watch::new(),
 
         usb_powered: Watch::new(),
+        vbus: SoftwareVbusDetect::new(false, false),
         charging: Watch::new(),
         last_activity: AtomicU64::new(0),
 
