@@ -15,27 +15,24 @@
 #![no_std]
 
 use embassy_boot::AlignedBuffer;
-use embassy_usb::class::dfu::consts::DfuAttributes;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog, WatchdogHandle};
 use embassy_nrf::{peripherals, Peri};
+use embassy_usb::class::dfu::consts::DfuAttributes;
 use embedded_storage::nor_flash::NorFlash;
-
-/// Watchdog configuration. The bootloader starts the watchdog, and the application takes it over,
-/// which only works with an identical configuration.
-fn wdt_config() -> wdt::Config {
-    let mut config = wdt::Config::default();
-    config.timeout_ticks = 32768 * 5; // 5 seconds
-    config.action_during_sleep = SleepConfig::Run;
-    config.action_during_debug_halt = HaltConfig::Pause;
-    config
-}
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
 /// bootloader's carries into the application. `None` if it's running with a different
 /// configuration, which can't be changed or stopped, so a watchdog reset is coming.
 pub fn try_wdt(wdt: Peri<'static, peripherals::WDT>) -> Option<WatchdogHandle> {
-    Watchdog::try_new(wdt, wdt_config()).ok().map(|(_, [handle])| handle)
+    let mut config = wdt::Config::default();
+    config.timeout_ticks = 32768 * 5; // 5 seconds
+    config.action_during_sleep = SleepConfig::Run;
+    config.action_during_debug_halt = HaltConfig::Pause;
+
+    Watchdog::try_new(wdt, config)
+        .ok()
+        .map(|(_, [handle])| handle)
 }
 
 /// USB vendor ID, pid.codes.
