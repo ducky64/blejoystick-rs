@@ -141,7 +141,6 @@ dependencies = [
  "defmt 1.0.1",
  "defmt-rtt",
  "embassy-boot",
- "embassy-boot-nrf",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
@@ -581,23 +580,6 @@ dependencies = [
  "embedded-storage",
  "embedded-storage-async",
  "signature",
-]
-
-[[package]]
-name = "embassy-boot-nrf"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "937884e12e8d77684615868d0902f65611052b9c4cc0d6e640825e81e27686cc"
-dependencies = [
- "cfg-if",
- "cortex-m",
- "cortex-m-rt",
- "defmt 1.0.1",
- "embassy-boot",
- "embassy-nrf",
- "embassy-sync",
- "embedded-storage",
- "embedded-storage-async",
 ]
 
 [[package]]

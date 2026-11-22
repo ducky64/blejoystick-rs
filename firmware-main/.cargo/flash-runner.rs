@@ -62,9 +62,12 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let chip: String = args.value_from_str("--chip")?;
     let speed_khz: Option<u32> = args.opt_value_from_str("--speed")?;
 
-    // new args
-    let persist_addr: u64 = args.value_from_fn("--persist-addr", parse_int::parse)?;
-    let persist_size: usize = args.value_from_fn("--persist-size", parse_int::parse)?;
+    // new args, repeatable: each --persist-addr is paired with the --persist-size at the same position
+    let persist_addrs: Vec<u64> = args.values_from_fn("--persist-addr", parse_int::parse)?;
+    let persist_sizes: Vec<usize> = args.values_from_fn("--persist-size", parse_int::parse)?;
+    if persist_addrs.len() != persist_sizes.len() {
+        return Err("each --persist-addr must have a matching --persist-size".into());
+    }
 
     let elf_path_str: String = args.free_from_str()?;
     let elf_path = Path::new(&elf_path_str);
@@ -87,11 +90,15 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         let mut session = probe.attach(&chip, Permissions::default())?;
 
-        println!("Reading persistent flash {:#010X}...", persist_addr);
-        let mut persist_buffer = vec![0u8; persist_size];
+        let mut persist_buffers = Vec::new();
         {
             let mut core = session.core(0)?;
-            core.read_8(persist_addr, &mut persist_buffer)?;
+            for (&addr, &size) in persist_addrs.iter().zip(persist_sizes.iter()) {
+                println!("Reading persistent flash {:#010X}+{:#X}...", addr, size);
+                let mut buffer = vec![0u8; size];
+                core.read_8(addr, &mut buffer)?;
+                persist_buffers.push((addr, buffer));
+            }
         }
 
         // ideally we could delegate this to probe-rs as a subcommand
@@ -109,7 +116,9 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
         println!("Restoring persistent flash...");
         let mut loader = session.target().flash_loader();
-        loader.add_data(persist_addr, &persist_buffer)?;
+        for (addr, buffer) in &persist_buffers {
+            loader.add_data(*addr, buffer)?;
+        }
         let mut restore_options = DownloadOptions::default();
         restore_options.do_chip_erase = false;
         loader.commit(&mut session, restore_options)?;
