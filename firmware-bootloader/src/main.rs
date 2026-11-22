@@ -25,7 +25,7 @@ use embassy_futures::select::select;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::usb::vbus_detect::{self, HardwareVbusDetect};
 use embassy_nrf::usb::{self, Driver};
-use embassy_nrf::wdt::{Watchdog, WatchdogHandle};
+use embassy_nrf::wdt::WatchdogHandle;
 use embassy_nrf::{bind_interrupts, pac, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
@@ -33,7 +33,7 @@ use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
 use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, usb_config, wdt_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config};
 
 use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
 
@@ -61,14 +61,10 @@ fn active_partition(flash: &SharedFlash) -> FlashPartition<'_> {
 fn main() -> ! {
     let p = embassy_nrf::init(Default::default());
 
-    // survives soft resets, so it may already be running (with this config)
-    let (_wdt, [mut wdt]) = match Watchdog::try_new(p.WDT, wdt_config()) {
-        Ok(x) => x,
-        Err(_) => {
-            defmt::error!("WDT: already running with a different config, waiting for reset");
-            loop {
-                cortex_m::asm::wfe();
-            }
+    let Some(mut wdt) = try_wdt(p.WDT) else {
+        defmt::error!("WDT: already running with a different config, waiting for reset");
+        loop {
+            cortex_m::asm::wfe();
         }
     };
 

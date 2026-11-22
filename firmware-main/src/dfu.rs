@@ -14,7 +14,6 @@ use embassy_boot::{BlockingFirmwareState, State};
 use embassy_futures::select::{select3, Either3};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
-use embassy_nrf::wdt::Watchdog;
 use embassy_nrf::{peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -22,7 +21,7 @@ use embassy_sync::watch;
 use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, usb_config, wdt_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
@@ -30,7 +29,7 @@ use crate::bus::{FlashPartition, GlobalBus};
 use crate::prelude::*;
 use crate::Irqs;
 
-/// How often the watchdog (started by the bootloader, see [`wdt_config`]) is fed.
+/// How often the watchdog (started by the bootloader, see [`try_wdt`]) is fed.
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
 
 /// wDetachTimeOut. With WILL_DETACH the host doesn't reset the device after DFU_DETACH, so this is
@@ -177,13 +176,10 @@ async fn run_usb_session(
 /// Takes over and feeds the watchdog started by the bootloader.
 #[embassy_executor::task]
 pub(crate) async fn wdt_task(wdt: Peri<'static, peripherals::WDT>) {
-    let (_wdt, [mut handle]) = match Watchdog::try_new(wdt, wdt_config()) {
-        Ok(x) => x,
-        Err(_) => {
-            // running with a different configuration, nothing we can do but let it reset us
-            error!("WDT: already running with a different config, a reset is imminent");
-            return;
-        }
+    let Some(mut handle) = try_wdt(wdt) else {
+        // running with a different configuration, nothing we can do but let it reset us
+        error!("WDT: already running with a different config, a reset is imminent");
+        return;
     };
 
     let mut ticker = Ticker::every(WDT_PET_INTERVAL);
