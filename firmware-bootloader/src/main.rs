@@ -3,6 +3,10 @@
 //! The application exposes only the DFU run-time interface. On DFU_DETACH it marks the state
 //! partition `DfuDetach` and resets into this bootloader, which enumerates as a DFU-mode device and
 //! streams the new image straight into ACTIVE. See `overwrite.rs` for the state machine.
+//!
+//! DFU mode is manifestation tolerant without WILL_DETACH (see [`firmware_common::dfu_attributes`]):
+//! after the download it returns to dfuIDLE and waits for the host to reset it into the new image,
+//! with a USB reset or DFU_DETACH (see [`HostResetHandler`]).
 #![no_std]
 #![no_main]
 
@@ -25,14 +29,13 @@ use embassy_nrf::wdt::{Watchdog, WatchdogHandle};
 use embassy_nrf::{bind_interrupts, pac, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_usb::class::dfu::consts::DfuAttributes;
 use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
 use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
-use firmware_common::{linker_partition, state_buffer, usb_config, wdt_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, usb_config, wdt_config};
 
-use crate::overwrite::{Action, OverwriteDfuHandler, UsbResetHandler};
+use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
 
 /// DFU transfer size (wTransferSize), one flash page.
 const DFU_BLOCK_SIZE: usize = Nvmc::ERASE_SIZE;
@@ -94,13 +97,13 @@ fn run_dfu(
     flash: &SharedFlash,
     mut wdt: WatchdogHandle,
 ) -> ! {
-    defmt::info!("DFU: entering DFU mode");
-
     // USBD needs the HFXO. There's no MPSL in the bootloader, so start it directly.
     let clock = pac::CLOCK;
     clock.events_hfclkstarted().write_value(0);
     clock.tasks_hfclkstart().write_value(1);
     while clock.events_hfclkstarted().read() == 0 {}
+
+    defmt::info!("DFU: entering DFU mode");
 
     // everything the USB device borrows, declared before it
     let mut config_desc = [0u8; 256];
@@ -109,7 +112,7 @@ fn run_dfu(
     let mut control_buf = [0u8; DFU_BLOCK_SIZE]; // must fit a whole DFU_DNLOAD block
     let mut updater_buf = state_buffer();
     let mut state_buf = state_buffer();
-    let mut reset_handler = UsbResetHandler(ResetImmediate);
+    let mut reset_handler = HostResetHandler;
 
     // embassy-boot's updater, with ACTIVE as its "DFU" partition: the image is written in place
     let updater = BlockingFirmwareUpdater::new(
@@ -122,23 +125,31 @@ fn run_dfu(
     let state = BlockingFirmwareState::new(state_partition(flash), &mut state_buf.0);
     let mut dfu_state = DfuState::new(
         OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state, ResetImmediate),
-        DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT,
+        dfu_attributes(),
     );
 
     let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
     // same VID/PID as the application's run-time interface, so dfu-util follows the device across the detach
     let config = usb_config("blejoystick-rs bootloader");
     let mut builder = embassy_usb::Builder::new(driver, config, &mut config_desc, &mut bos_desc, &mut msos_desc, &mut control_buf);
-    dfu_mode::usb_dfu(&mut builder, &mut dfu_state, DFU_BLOCK_SIZE, |_| {});
+    // before the DFU class, which would otherwise accept (and ignore) DFU_DETACH
     builder.handler(&mut reset_handler);
+    dfu_mode::usb_dfu(&mut builder, &mut dfu_state, DFU_BLOCK_SIZE, |_| {});
     let mut device = builder.build();
 
-    // block_on busy-polls, so this feeds the watchdog continuously while USB is idle
+    // block_on busy-polls, so this feeds the watchdog continuously while USB is idle, and
+    // picks up a reset requested by DFU_DETACH once the request has been answered
     let pet_wdt = poll_fn(|_| {
         wdt.pet();
-        Poll::<()>::Pending
+        if overwrite::detach_requested() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     });
     block_on(select(device.run(), pet_wdt));
+    // let the hardware finish the DETACH status stage, so the host sees it succeed (~10 ms)
+    cortex_m::asm::delay(64_000_000 / 100);
     cortex_m::peripheral::SCB::sys_reset()
 }
 

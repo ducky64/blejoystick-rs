@@ -8,8 +8,9 @@ use embassy_boot::State;
 use embassy_boot_nrf::BlockingFirmwareState;
 use embassy_usb::class::dfu::consts::Status;
 use embassy_usb::class::dfu::dfu_mode::Handler;
+use embassy_usb::control::{OutResponse, Recipient, Request, RequestType};
 use embassy_usb_dfu::dfu::FirmwareHandler;
-use embassy_usb_dfu::Reset;
+use embassy_usb_dfu::{Reset, ResetImmediate};
 use embedded_storage::nor_flash::NorFlash;
 
 /// What the bootloader should do after inspecting the state partition.
@@ -49,7 +50,7 @@ pub fn decide<STATE: NorFlash>(state: &mut BlockingFirmwareState<'_, STATE>) -> 
 }
 
 /// Set once a complete image has been written. The host's next USB reset (`dfu-util -R`) then
-/// resets the device into the new image, see [`UsbResetHandler`].
+/// resets the device into the new image, see [`HostResetHandler`].
 static DOWNLOAD_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 /// Wraps embassy-usb-dfu's [`FirmwareHandler`] (writing straight into ACTIVE) so that the state is
@@ -143,17 +144,46 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
     }
 }
 
-/// Resets into the new image on the host's USB reset after a completed download.
-///
-/// With MANIFESTATION_TOLERANT the DFU class returns to dfuIDLE after the download and never resets
-/// by itself. (Non-tolerant mode is broken in embassy-usb 0.6: it reports dfuMANIFEST forever.)
-pub struct UsbResetHandler<RST: Reset>(pub RST);
+/// DFU_DETACH bRequest.
+const DFU_DETACH: u8 = 0;
 
-impl<RST: Reset> embassy_usb::Handler for UsbResetHandler<RST> {
+/// Set by DFU_DETACH, see [`HostResetHandler`]. The reset itself happens in the main loop, once the
+/// request has been answered.
+static DETACH_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether DFU_DETACH has requested a reset.
+pub fn detach_requested() -> bool {
+    DETACH_REQUESTED.load(Ordering::Acquire)
+}
+
+/// Resets the device when the host asks for it:
+///
+/// - a USB reset after a completed download (the DFU 1.1 way).
+/// - DFU_DETACH, at any time. Not strictly spec compliant, but a workaround for libusb on Windows,
+///   which can't issue a proper USB reset.
+///
+/// Must be registered before the DFU class, which accepts and ignores DFU_DETACH.
+pub struct HostResetHandler;
+
+impl embassy_usb::Handler for HostResetHandler {
     fn reset(&mut self) {
         if DOWNLOAD_COMPLETE.load(Ordering::Acquire) {
             defmt::info!("DFU: USB reset after download, resetting");
-            self.0.sys_reset();
+            ResetImmediate.sys_reset();
         }
+    }
+
+    fn control_out(&mut self, req: Request, _data: &[u8]) -> Option<OutResponse> {
+        if (req.request_type, req.recipient, req.request)
+            != (RequestType::Class, Recipient::Interface, DFU_DETACH)
+        {
+            return None;
+        }
+        defmt::info!(
+            "DFU: DFU_DETACH, resetting (download complete: {})",
+            DOWNLOAD_COMPLETE.load(Ordering::Acquire)
+        );
+        DETACH_REQUESTED.store(true, Ordering::Release);
+        Some(OutResponse::Accepted)
     }
 }

@@ -15,6 +15,7 @@
 #![no_std]
 
 use embassy_boot::AlignedBuffer;
+use embassy_usb::class::dfu::consts::DfuAttributes;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig};
 use embedded_storage::nor_flash::NorFlash;
@@ -43,6 +44,11 @@ pub fn usb_config(product: &'static str) -> embassy_usb::Config<'static> {
     config.serial_number = None;
     config.max_power = 100;
     config
+}
+
+/// DFU functional descriptor attributes
+pub fn dfu_attributes() -> DfuAttributes {
+    DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT
 }
 
 /// Scratch buffer for embassy-boot's state partition (one NVMC write word).

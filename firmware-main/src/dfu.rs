@@ -1,8 +1,9 @@
 //! Firmware update support: the USB DFU run-time interface, the bootloader watchdog, and
 //! confirming a freshly downloaded image.
 //!
-//! Flow (DFU 1.1): host runs `dfu-util -D app.bin -R` -> DFU_DETACH + USB reset on the application's
-//! run-time interface -> [`DetachHandler`] marks the state partition `DfuDetach` and resets ->
+//! Flow (DFU 1.1, see [`firmware_common::dfu_attributes`]): host runs `dfu-util -D app.bin -R` ->
+//! DFU_DETACH, then the host's USB reset within wDetachTimeOut (the device does not detach by
+//! itself, no WILL_DETACH) on the application's run-time interface -> [`DetachHandler`] marks the state partition `DfuDetach` and resets ->
 //! the bootloader (firmware-bootloader/) enumerates in DFU mode and writes the image straight
 //! into ACTIVE (no A/B swap) -> USB reset -> the new image boots "on trial" and, once the host has
 //! configured its USB DFU run-time interface (so it can take the next update), [`ConfirmHandler`]
@@ -19,9 +20,9 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch;
 use embassy_time::{Duration, Ticker};
 use embassy_usb::UsbDevice;
-use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
+use embassy_usb_dfu::application::{self as dfu_runtime, DfuState};
 use embassy_usb_dfu::{Reset, ResetImmediate};
-use firmware_common::{linker_partition, state_buffer, usb_config, wdt_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, usb_config, wdt_config};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
@@ -32,8 +33,9 @@ use crate::Irqs;
 /// How often the watchdog (started by the bootloader, see [`wdt_config`]) is fed.
 const WDT_PET_INTERVAL: Duration = Duration::from_secs(1);
 
-/// wDetachTimeOut: how long after DFU_DETACH the host's USB reset still enters DFU mode.
-const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(1000);
+/// wDetachTimeOut: how long after DFU_DETACH the host's USB reset still enters DFU mode. Generous,
+/// since a reset by port cycle (eg, on Windows) can take over a second.
+const DFU_DETACH_TIMEOUT: Duration = Duration::from_millis(5000);
 
 fn state_partition(bus: &'static GlobalBus) -> FlashPartition {
     linker_partition!(bus.flash, __bootloader_state_start, __bootloader_state_end)
@@ -46,12 +48,14 @@ struct DetachHandler {
 
 impl dfu_runtime::Handler for DetachHandler {
     fn enter_dfu(&mut self) {
-        info!("DFU: detach, resetting into bootloader DFU mode");
         let mut buf = state_buffer();
         let mut state = BlockingFirmwareState::new(state_partition(self.bus), &mut buf.0);
         match state.mark_dfu() {
-            Ok(()) => ResetImmediate.sys_reset(),
-            Err(e) => error!("DFU: failed to mark DFU state: {}", e),
+            Ok(()) => {
+                info!("DFU: detach + USB reset, resetting into bootloader DFU mode");
+                ResetImmediate.sys_reset()
+            }
+            Err(e) => error!("DFU: failed to mark DFU state, staying in run-time mode: {}", e),
         }
     }
 }
@@ -108,7 +112,7 @@ pub(crate) async fn usb_task(
     static DFU_STATE: StaticCell<DfuState<DetachHandler>> = StaticCell::new();
     let dfu_state = DFU_STATE.init(DfuState::new(
         DetachHandler { bus },
-        DfuAttributes::CAN_DOWNLOAD | DfuAttributes::MANIFESTATION_TOLERANT,
+        dfu_attributes(),
         DFU_DETACH_TIMEOUT,
     ));
     dfu_runtime::usb_dfu(&mut builder, dfu_state, |_| {});
@@ -147,7 +151,10 @@ async fn run_usb_session(
     };
     match select(usb_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
         Either::First(never) => never,
-        Either::Second(_) => Ok(()),
+        Either::Second(_) => {
+            info!("USB: VBUS removed, stopping USB device");
+            Ok(())
+        }
     }
 }
 
