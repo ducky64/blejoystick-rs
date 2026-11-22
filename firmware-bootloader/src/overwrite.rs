@@ -2,7 +2,7 @@
 //!
 //! See firmware-common for shared definitions of bootloader state flags.
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::cell::Cell;
 
 use embassy_boot::State;
 use embassy_boot_nrf::BlockingFirmwareState;
@@ -48,10 +48,6 @@ pub fn decide<STATE: NorFlash>(state: &mut BlockingFirmwareState<'_, STATE>) -> 
         }
     }
 }
-
-/// Set once a complete image has been written. The host's next USB reset (`dfu-util -R`) then
-/// resets the device into the new image, see [`HostResetHandler`].
-static DOWNLOAD_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 /// Wraps embassy-usb-dfu's [`FirmwareHandler`] (writing straight into ACTIVE) so that the state is
 /// `DfuDetach` for the whole download: an interrupted download always comes back in DFU mode.
@@ -102,7 +98,6 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
         }
         self.started = true;
         self.bytes = 0;
-        DOWNLOAD_COMPLETE.store(false, Ordering::Release);
 
         // invalidate the image before the first erase
         self.state.mark_dfu().map_err(|e| {
@@ -126,14 +121,9 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
     }
 
     fn finish(&mut self) -> Result<(), Status> {
-        // marks the state Swap (= download complete), or fails if signature verification is on and fails
         let result = self.inner.finish();
         if result.is_ok() {
-            defmt::info!(
-                "DFU: download complete, {} bytes, waiting for USB reset",
-                self.bytes
-            );
-            DOWNLOAD_COMPLETE.store(true, Ordering::Release);
+            defmt::info!("DFU: download complete");
         }
         result
     }
@@ -147,27 +137,31 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
 /// DFU_DETACH bRequest.
 const DFU_DETACH: u8 = 0;
 
-/// Set by DFU_DETACH, see [`HostResetHandler`]. The reset itself happens in the main loop, once the
-/// request has been answered.
-static DETACH_REQUESTED: AtomicBool = AtomicBool::new(false);
-
-/// Whether DFU_DETACH has requested a reset.
-pub fn detach_requested() -> bool {
-    DETACH_REQUESTED.load(Ordering::Acquire)
-}
-
 /// Resets the device when the host asks for it:
 ///
-/// - a USB reset after a completed download (the DFU 1.1 way).
+/// - a USB reset with a completed image, such as indicated by `Swap` state.
 /// - DFU_DETACH, at any time. Not strictly spec compliant, but a workaround for libusb on Windows,
-///   which can't issue a proper USB reset.
+///   which can't issue a proper USB reset. This path has a externally imposed delay
+///   to allow the transfer to finish
 ///
 /// Must be registered before the DFU class, which accepts and ignores DFU_DETACH.
-pub struct HostResetHandler;
+pub struct HostResetHandler<'d, STATE: NorFlash> {
+    state: BlockingFirmwareState<'d, STATE>,
+    detach_requested: &'d Cell<bool>,
+}
 
-impl embassy_usb::Handler for HostResetHandler {
+impl<'d, STATE: NorFlash> HostResetHandler<'d, STATE> {
+    pub fn new(state: BlockingFirmwareState<'d, STATE>, detach_requested: &'d Cell<bool>) -> Self {
+        Self {
+            state,
+            detach_requested,
+        }
+    }
+}
+
+impl<'d, STATE: NorFlash> embassy_usb::Handler for HostResetHandler<'d, STATE> {
     fn reset(&mut self) {
-        if DOWNLOAD_COMPLETE.load(Ordering::Acquire) {
+        if let Ok(State::Swap) = self.state.get_state() {
             defmt::info!("DFU: USB reset after download, resetting");
             ResetImmediate.sys_reset();
         }
@@ -179,11 +173,8 @@ impl embassy_usb::Handler for HostResetHandler {
         {
             return None;
         }
-        defmt::info!(
-            "DFU: DFU_DETACH, resetting (download complete: {})",
-            DOWNLOAD_COMPLETE.load(Ordering::Acquire)
-        );
-        DETACH_REQUESTED.store(true, Ordering::Release);
+        defmt::info!("DFU: DFU_DETACH, resetting");
+        self.detach_requested.set(true);
         Some(OutResponse::Accepted)
     }
 }

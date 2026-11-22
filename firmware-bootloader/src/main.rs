@@ -12,7 +12,7 @@
 
 mod overwrite;
 
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::future::poll_fn;
 use core::task::Poll;
 
@@ -110,7 +110,12 @@ fn run_dfu(
     let mut control_buf = [0u8; DFU_BLOCK_SIZE]; // must fit a whole DFU_DNLOAD block
     let mut updater_buf = state_buffer();
     let mut state_buf = state_buffer();
-    let mut reset_handler = HostResetHandler;
+    let mut reset_state_buf = state_buffer();
+    let detach_requested = Cell::new(false);
+    let mut reset_handler = HostResetHandler::new(
+        BlockingFirmwareState::new(state_partition(flash), &mut reset_state_buf.0),
+        &detach_requested,
+    );
 
     // embassy-boot's updater, with ACTIVE as its "DFU" partition: the image is written in place
     let updater = BlockingFirmwareUpdater::new(
@@ -138,7 +143,7 @@ fn run_dfu(
     // picks up a reset requested by DFU_DETACH once the request has been answered
     let pet_wdt = poll_fn(|_| {
         wdt.pet();
-        if overwrite::detach_requested() {
+        if detach_requested.get() {
             Poll::Ready(())
         } else {
             Poll::Pending
