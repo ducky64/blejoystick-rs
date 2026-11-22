@@ -1,7 +1,7 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # runner = "probe-rs run --chip nRF52840_xxAA --speed 16000"
 # chip erases, restoring the bootloader (0x0000_0000, 32K) and storage (0x000F_E000, 8K) - see memory.x
-# BOOTLOADER_STATE and DFU are intentionally erased, which leaves the bootloader in the Boot state
+# BOOTLOADER_STATE is intentionally erased, which leaves the bootloader in the Boot state
 runner = "rust-script ./.cargo/flash-runner.rs --chip nRF52840_xxAA --speed 16000 --persist-addr 0x0000_0000 --persist-size 0x8000 --persist-addr 0x000F_E000 --persist-size 0x2000"
 
 [build]

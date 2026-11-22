@@ -9,9 +9,16 @@ embassy-nrf = { version = "0.11", default-features = false, features = [
   "defmt",
   "nrf52840",
   "rt",
+  "unstable-pac",
 ] }
 embassy-boot-nrf = { version = "0.12", features = ["defmt"] }
+embassy-boot = { version = "0.7", features = ["defmt"] }
+embassy-embedded-hal = "0.6"
+embassy-futures = "0.1.1"
 embassy-sync = "0.8"
+embassy-usb = { version = "0.6", default-features = false, features = ["defmt"] }
+embassy-usb-dfu = { version = "0.3", features = ["dfu", "cortex-m", "defmt"] }
+embedded-storage = "0.3"
 
 cortex-m = { version = "0.7.6", features = [
   "inline-asm",
