@@ -1,19 +1,29 @@
 //! Firmware update support: USB DFU (in-application download), the bootloader watchdog,
 //! and confirming a freshly swapped image.
+//!
+//! Flow: host runs `dfu-util -D app.bin` -> the DFU class writes the image into the DFU
+//! partition and marks the state partition as "swap" -> reset -> the bootloader
+//! (firmware-bootloader/) swaps ACTIVE and DFU -> new image boots and, once it has been
+//! running for [`MARK_BOOTED_DELAY`], calls `mark_booted`. If it resets before that
+//! (eg, hangs and the watchdog fires), the bootloader reverts to the previous image.
 
 use embassy_boot::{AlignedBuffer, BlockingFirmwareState, BlockingFirmwareUpdater, FirmwareUpdaterConfig, State};
 use embassy_futures::select::{select, Either};
 use embassy_nrf::nvmc::Nvmc;
+use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog};
 use embassy_nrf::{peripherals, Peri};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch;
 use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::class::dfu::consts::{DfuAttributes, Status};
 use embassy_usb::class::dfu::dfu_mode::{self, DfuState, Handler};
 use embassy_usb_dfu::dfu::FirmwareHandler;
+use embassy_usb::UsbDevice;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
-use nrf_sdc::mpsl::{Hfclk, MultiprotocolServiceLayer};
+use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
 use crate::bus::{linker_partition, FlashPartition, GlobalBus};
@@ -67,13 +77,13 @@ impl Handler for DfuHandler {
                 self.bytes += data.len();
                 info!("DFU: written {} KiB", self.bytes / 1024);
             },
-            Err(e) => error!("DFU: write failed"),
+            Err(e) => error!("DFU: write failed, status {=u8:#x}", e as u8),  // DFU1.1 bStatus code
         }
         result
     }
 
     fn finish(&mut self) -> Result<(), Status> {
-        info!("DFU: download complete");
+        info!("DFU: download complete, {} bytes", self.bytes);
         self.inner.finish()
     }
 
@@ -131,32 +141,36 @@ pub(crate) async fn usb_task(
     let mut usb_powered_rcv = unwrap!(bus.usb_powered.receiver());
     loop {
         usb_powered_rcv.changed_and(|powered| *powered).await;
-
-        // USBD needs the HFXO, whose ownership belongs to the MPSL
-        let hfclk = match mpsl.request_hfclk().await {
-            Ok(hfclk) => hfclk,
-            Err(e) => {
-                error!("USB: failed to request HFCLK: {}", e);
-                continue;
-            }
-        };
-        if let Err(e) = Hfclk::wait().await {
-            error!("USB: HFCLK failed to start: {}", e);
-            continue;
+        match run_usb_session(mpsl, &mut device, &mut usb_powered_rcv).await {
+            Ok(()) => info!("USB: VBUS removed"),
+            Err(e) => error!("USB: HFCLK error: {}", e),
         }
-        info!("USB: enabled");
+    }
+}
 
-        let usb_fut = async {
-            loop {
-                device.run_until_suspend().await;
-                device.wait_resume().await;
-            }
-        };
-        match select(usb_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
-            Either::First(never) => never,
-            Either::Second(_) => info!("USB: VBUS removed"),
+type UsbPoweredReceiver = watch::Receiver<'static, CriticalSectionRawMutex, bool, 2>;
+
+/// Runs the USB device for one VBUS-present session, returning once VBUS is removed.
+/// The HFCLK is held for the duration of the session and released on return.
+async fn run_usb_session(
+    mpsl: &'static MultiprotocolServiceLayer<'static>,
+    device: &mut UsbDevice<'static, Driver<'static, &'static SoftwareVbusDetect>>,
+    usb_powered_rcv: &mut UsbPoweredReceiver,
+) -> Result<(), mpsl::Error> {
+    // USBD needs the HFXO, whose ownership belongs to the MPSL
+    let _hfclk = mpsl.request_hfclk().await.inspect_err(|e| error!("USB: failed to request HFCLK: {}", e))?;
+    Hfclk::wait().await.inspect_err(|e| error!("USB: HFCLK failed to start: {}", e))?;
+    info!("USB: enabled");
+
+    let usb_fut = async {
+        loop {
+            device.run_until_suspend().await;
+            device.wait_resume().await;
         }
-        drop(hfclk);
+    };
+    match select(usb_fut, usb_powered_rcv.changed_and(|powered| !*powered)).await {
+        Either::First(never) => never,
+        Either::Second(_) => Ok(()),
     }
 }
 
