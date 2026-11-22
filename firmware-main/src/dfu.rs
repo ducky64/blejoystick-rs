@@ -100,7 +100,7 @@ pub(crate) async fn usb_task(
     // VBUS is reported in software by charger_task, since the POWER interrupt belongs to the MPSL
     let driver = Driver::new(usbd, Irqs, &bus.vbus);
 
-    let config = usb_config("blejoystick-rs");
+    let config = usb_config("blejoystick-rs", None);
 
     static CONFIG_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);

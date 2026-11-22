@@ -40,13 +40,19 @@ pub const USB_VID: u16 = 0x1209;
 /// USB product ID, pid.codes test PID. TODO allocate a real one.
 pub const USB_PID: u16 = 0x0001;
 
+/// USB serial number of the bootloader's DFU mode. The application has none (for now).
+///
+/// Differs from the application's so the host sees DFU mode as a different device, and
+/// dfu-util sees the bootloader's DFU mode as a different device.
+pub const USB_SERIAL_DFU: &str = "DFU";
+
 /// USB device configuration, the same for the application's DFU run-time interface and the
-/// bootloader's DFU mode, apart from the product string.
-pub fn usb_config(product: &'static str) -> embassy_usb::Config<'static> {
+/// bootloader's DFU mode, apart from the product and serial number strings.
+pub fn usb_config(product: &'static str, serial_number: Option<&'static str>) -> embassy_usb::Config<'static> {
     let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
-    config.serial_number = None;
+    config.serial_number = serial_number;
     config.max_power = 100;
     config
 }

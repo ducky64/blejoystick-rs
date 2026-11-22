@@ -33,7 +33,7 @@ use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
 use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config};
+use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, USB_SERIAL_DFU};
 
 use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
 
@@ -125,8 +125,7 @@ fn run_dfu(
     );
 
     let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
-    // same VID/PID as the application's run-time interface, so dfu-util follows the device across the detach
-    let config = usb_config("blejoystick-rs bootloader");
+    let config = usb_config("blejoystick-rs bootloader", Some(USB_SERIAL_DFU));
     let mut builder = embassy_usb::Builder::new(driver, config, &mut config_desc, &mut bos_desc, &mut msos_desc, &mut control_buf);
     // before the DFU class, which would otherwise accept (and ignore) DFU_DETACH
     builder.handler(&mut reset_handler);
