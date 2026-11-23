@@ -111,10 +111,11 @@ fn run_dfu(
     let mut updater_buf = state_buffer();
     let mut state_buf = state_buffer();
     let mut reset_state_buf = state_buffer();
-    let detach_requested = Cell::new(false);
+    // set by the handlers below, see HostResetHandler
+    let reset_requested = Cell::new(false);
     let mut reset_handler = HostResetHandler::new(
         BlockingFirmwareState::new(state_partition(flash), &mut reset_state_buf.0),
-        &detach_requested,
+        &reset_requested,
     );
 
     // embassy-boot's updater, with ACTIVE as its "DFU" partition: the image is written in place
@@ -127,7 +128,7 @@ fn run_dfu(
     );
     let state = BlockingFirmwareState::new(state_partition(flash), &mut state_buf.0);
     let mut dfu_state = DfuState::new(
-        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state, ResetImmediate),
+        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state, &reset_requested),
         dfu_attributes(),
     );
 
@@ -139,11 +140,11 @@ fn run_dfu(
     dfu_mode::usb_dfu(&mut builder, &mut dfu_state, DFU_BLOCK_SIZE, |_| {});
     let mut device = builder.build();
 
-    // block_on busy-polls, so this feeds the watchdog continuously while USB is idle, and
-    // picks up a reset requested by DFU_DETACH once the request has been answered
+    // block_on busy-polls, so this feeds the watchdog continuously while USB is idle, and picks
+    // up a requested reset after the USB stack has finished handling what requested it
     let pet_wdt = poll_fn(|_| {
         wdt.pet();
-        if detach_requested.get() {
+        if reset_requested.get() {
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -151,7 +152,8 @@ fn run_dfu(
     });
     block_on(select(device.run(), pet_wdt));
 
-    // DFU_DETACH: let its status stage complete. The SysTick runs from the 64 MHz CPU clock.
+    // Let a DFU_DETACH status stage complete (a host's USB reset lasts at least 10 ms anyway).
+    // The SysTick runs from the 64 MHz CPU clock.
     let syst = defmt::unwrap!(cortex_m::Peripherals::take()).SYST;
     cortex_m::delay::Delay::new(syst, 64_000_000).delay_us(DETACH_RESET_DELAY.as_micros() as u32);
     cortex_m::peripheral::SCB::sys_reset()

@@ -10,7 +10,7 @@ use embassy_usb::class::dfu::consts::Status;
 use embassy_usb::class::dfu::dfu_mode::Handler;
 use embassy_usb::control::{OutResponse, Recipient, Request, RequestType};
 use embassy_usb_dfu::dfu::FirmwareHandler;
-use embassy_usb_dfu::{Reset, ResetImmediate};
+use embassy_usb_dfu::Reset;
 use embedded_storage::nor_flash::NorFlash;
 
 /// What the bootloader should do after inspecting the state partition.
@@ -60,7 +60,7 @@ pub struct OverwriteDfuHandler<
 > {
     inner: FirmwareHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>,
     state: BlockingFirmwareState<'d, STATE>,
-    reset: RST,
+    reset_requested: &'d Cell<bool>,
     started: bool,
     bytes: usize,
 }
@@ -68,17 +68,17 @@ pub struct OverwriteDfuHandler<
 impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
     OverwriteDfuHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>
 {
-    /// `inner` must have been created with an updater whose DFU partition is ACTIVE.
-    /// `state` must be the same state partition as the updater's.
+    /// `inner` must have been created with an updater whose DFU partition is ACTIVE (its reset is
+    /// never used). `state` must be the same state partition as the updater's.
     pub fn new(
         inner: FirmwareHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>,
         state: BlockingFirmwareState<'d, STATE>,
-        reset: RST,
+        reset_requested: &'d Cell<bool>,
     ) -> Self {
         Self {
             inner,
             state,
-            reset,
+            reset_requested,
             started: false,
             bytes: 0,
         }
@@ -94,7 +94,8 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
             // second download in the same session could skip an erase. Start over from a reset
             // instead (the state is still DfuDetach, so this comes back up in DFU mode).
             defmt::warn!("DFU: second download in one session, resetting");
-            self.reset.sys_reset();
+            self.reset_requested.set(true);
+            return Err(Status::ErrUnknown);
         }
         self.started = true;
         self.bytes = 0;
@@ -129,32 +130,33 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
     }
 
     fn system_reset(&mut self) {
-        // only called by the DFU class on a USB reset during dfuMANIFEST-SYNC / dfuMANIFEST
-        self.inner.system_reset()
+        // only called by the DFU class on a USB reset during dfuMANIFEST-SYNC / dfuMANIFEST, ie
+        // after a completed download: HostResetHandler sees the same USB reset in Swap state
     }
 }
 
 /// DFU_DETACH bRequest.
 const DFU_DETACH: u8 = 0;
 
-/// Resets the device when the host asks for it:
+/// Requests a reset (`reset_requested`) when the host asks for one:
 ///
 /// - a USB reset with a completed image, such as indicated by `Swap` state.
 /// - DFU_DETACH, at any time. Not strictly spec compliant, but a workaround for libusb on Windows,
-///   which can't issue a proper USB reset. This path has a externally imposed delay
-///   to allow the transfer to finish
+///   which can't issue a proper USB reset.
+///
+/// The caller resets, after a delay that allows a DFU_DETACH transfer to finish.
 ///
 /// Must be registered before the DFU class, which accepts and ignores DFU_DETACH.
 pub struct HostResetHandler<'d, STATE: NorFlash> {
     state: BlockingFirmwareState<'d, STATE>,
-    detach_requested: &'d Cell<bool>,
+    reset_requested: &'d Cell<bool>,
 }
 
 impl<'d, STATE: NorFlash> HostResetHandler<'d, STATE> {
-    pub fn new(state: BlockingFirmwareState<'d, STATE>, detach_requested: &'d Cell<bool>) -> Self {
+    pub fn new(state: BlockingFirmwareState<'d, STATE>, reset_requested: &'d Cell<bool>) -> Self {
         Self {
             state,
-            detach_requested,
+            reset_requested,
         }
     }
 }
@@ -163,7 +165,7 @@ impl<'d, STATE: NorFlash> embassy_usb::Handler for HostResetHandler<'d, STATE> {
     fn reset(&mut self) {
         if let Ok(State::Swap) = self.state.get_state() {
             defmt::info!("DFU: USB reset after download, resetting");
-            ResetImmediate.sys_reset();
+            self.reset_requested.set(true);
         }
     }
 
@@ -174,7 +176,7 @@ impl<'d, STATE: NorFlash> embassy_usb::Handler for HostResetHandler<'d, STATE> {
             return None;
         }
         defmt::info!("DFU: DFU_DETACH, resetting");
-        self.detach_requested.set(true);
+        self.reset_requested.set(true);
         Some(OutResponse::Accepted)
     }
 }
