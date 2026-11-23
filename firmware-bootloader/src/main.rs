@@ -34,7 +34,8 @@ use embassy_usb_dfu::dfu::FirmwareHandler;
 use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
 use firmware_common::{
-    dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY, USB_SERIAL_DFU,
+    dfu_attributes, linker_partition, msos_winusb, state_buffer, try_wdt, usb_config,
+    DETACH_RESET_DELAY, MSOS_DESC_LEN, USB_SERIAL_DFU,
 };
 
 use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
@@ -106,7 +107,7 @@ fn run_dfu(
     // everything the USB device borrows, declared before it
     let mut config_desc = [0u8; 256];
     let mut bos_desc = [0u8; 256];
-    let mut msos_desc = [0u8; 0];
+    let mut msos_desc = [0u8; MSOS_DESC_LEN];
     let mut control_buf = [0u8; DFU_BLOCK_SIZE]; // must fit a whole DFU_DNLOAD block
     let mut updater_buf = state_buffer();
     let mut state_buf = state_buffer();
@@ -135,6 +136,7 @@ fn run_dfu(
     let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
     let config = usb_config("blejoystick-rs bootloader", Some(USB_SERIAL_DFU));
     let mut builder = embassy_usb::Builder::new(driver, config, &mut config_desc, &mut bos_desc, &mut msos_desc, &mut control_buf);
+    msos_winusb(&mut builder);
     // before the DFU class, which would otherwise accept (and ignore) DFU_DETACH
     builder.handler(&mut reset_handler);
     dfu_mode::usb_dfu(&mut builder, &mut dfu_state, DFU_BLOCK_SIZE, |_| {});

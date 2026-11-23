@@ -21,7 +21,10 @@ use embassy_sync::watch;
 use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
-use firmware_common::{dfu_attributes, linker_partition, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY};
+use firmware_common::{
+    dfu_attributes, linker_partition, msos_winusb, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY,
+    MSOS_DESC_LEN,
+};
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
 
@@ -100,7 +103,7 @@ pub(crate) async fn usb_task(
 
     static CONFIG_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
-    static MSOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
+    static MSOS_DESC: ConstStaticCell<[u8; MSOS_DESC_LEN]> = ConstStaticCell::new([0; MSOS_DESC_LEN]);
     static CONTROL_BUF: ConstStaticCell<[u8; 64]> = ConstStaticCell::new([0; 64]);
     let mut builder = embassy_usb::Builder::new(
         driver,
@@ -110,6 +113,7 @@ pub(crate) async fn usb_task(
         MSOS_DESC.take(),
         CONTROL_BUF.take(),
     );
+    msos_winusb(&mut builder);
 
     static DFU_STATE: StaticCell<DfuState<DetachHandler>> = StaticCell::new();
     let dfu_state = DFU_STATE.init(DfuState::new(

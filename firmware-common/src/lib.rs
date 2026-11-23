@@ -19,6 +19,9 @@ use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog, WatchdogHandle};
 use embassy_nrf::{peripherals, Peri};
 use embassy_usb::class::dfu::consts::DfuAttributes;
+use embassy_usb::driver::Driver;
+use embassy_usb::msos::{self, windows_version};
+use embassy_usb::Builder;
 use embedded_storage::nor_flash::NorFlash;
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
@@ -48,13 +51,40 @@ pub const USB_SERIAL_DFU: &str = "DFU";
 
 /// USB device configuration, the same for the application's DFU run-time interface and the
 /// bootloader's DFU mode, apart from the product and serial number strings.
-pub fn usb_config(product: &'static str, serial_number: Option<&'static str>) -> embassy_usb::Config<'static> {
+pub fn usb_config(
+    product: &'static str,
+    serial_number: Option<&'static str>,
+) -> embassy_usb::Config<'static> {
     let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
     config.serial_number = serial_number;
     config.max_power = 100;
     config
+}
+
+/// bMS_VendorCode: the bRequest of the vendor request Windows uses to fetch the MS OS 2.0 descriptor set.
+const MSOS_VENDOR_CODE: u8 = 0x01;
+
+/// Device-specific random GUID for WinUSB function.
+const MSOS_INTERFACE_GUIDS: &[&str] = &["{E1D91319-FC5A-4559-B3C5-E097E87E5DB5}"];
+
+pub const MSOS_DESC_LEN: usize = 256;
+
+/// Adds an MS OS 2.0 descriptor set (a BOS platform capability, needs bcdUSB >= 2.1) that has
+/// Windows bind WinUSB automatically (no INF or Zadig), so dfu-util can use the device.
+///
+/// The features are device level: Windows only treats a device as composite (usbccgp, which reads
+/// function subsets) when it has more than one interface, and the DFU interface is the only one.
+/// Once another interface is added, these must move into the DFU function's subset (via
+/// `usb_dfu`'s `func_modifier`), or WinUSB would replace the composite driver for the whole device.
+pub fn msos_winusb<'d, D: Driver<'d>>(builder: &mut Builder<'d, D>) {
+    builder.msos_descriptor(windows_version::WIN8_1, MSOS_VENDOR_CODE);
+    builder.msos_feature(msos::CompatibleIdFeatureDescriptor::new("WINUSB", ""));
+    builder.msos_feature(msos::RegistryPropertyFeatureDescriptor::new(
+        "DeviceInterfaceGUIDs",
+        msos::PropertyData::RegMultiSz(MSOS_INTERFACE_GUIDS),
+    ));
 }
 
 /// DFU functional descriptor attributes
