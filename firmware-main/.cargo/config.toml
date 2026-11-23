@@ -1,9 +1,25 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # runner = "probe-rs run --chip nRF52840_xxAA --speed 16000"
-runner = "rust-script ./.cargo/flash-runner.rs --chip nRF52840_xxAA --speed 16000 --persist-addr 0x000F_E000 --persist-size 0x1000"
+# chip erases, restoring the bootloader (0x0000_0000, 32K) and storage (0x000F_E000, 8K) - see memory.x
+# BOOTLOADER_STATE is intentionally erased, which leaves the bootloader in the Boot state
+runner = "rust-script ./.cargo/flash-runner.rs --chip nRF52840_xxAA --speed 16000 --persist-addr 0x0000_0000 --persist-size 0x8000 --persist-addr 0x000F_E000 --persist-size 0x2000"
 
 [build]
 target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
+
+[alias]
+attach = [
+  "run",
+  "--config",
+  "target.thumbv7em-none-eabihf.runner = 'probe-rs attach --chip nRF52840_xxAA --speed 16000'",
+]
+# flash over USB DFU instead of SWD: `cargo dfu` (see the README)
+# 1209:0001 must match USB_VID/USB_PID in firmware-common
+dfu = [
+  "run",
+  "--config",
+  "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/dfu-runner.rs 1209:0001'",
+]

@@ -1,0 +1,44 @@
+[package]
+edition = "2021"
+name = "blejoystick-bootloader"
+rust-version = "1.86"
+version = "0.1.0"
+
+[dependencies]
+embassy-nrf = { version = "0.11", default-features = false, features = [
+  "defmt",
+  "nrf52840",
+  "rt",
+  "unstable-pac",
+] }
+embassy-boot-nrf = { version = "0.12", features = ["defmt"] }
+embassy-boot = { version = "0.7", features = ["defmt"] }
+embassy-embedded-hal = "0.6"
+embassy-futures = "0.1.1"
+embassy-sync = "0.8"
+embassy-usb = { version = "0.6", default-features = false, features = ["defmt"] }
+embassy-usb-dfu = { version = "0.3", features = ["dfu", "cortex-m", "defmt"] }
+embedded-storage = "0.3"
+firmware-common = { path = "../firmware-common" }
+
+cortex-m = { version = "0.7.6", features = [
+  "inline-asm",
+  "critical-section-single-core",
+] }
+cortex-m-rt = "0.7.0"
+
+defmt = "1.0"
+defmt-rtt = { version = "1.0", features = ["disable-blocking-mode"] }
+
+[profile.dev]
+opt-level = "s"
+debug = 2
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false

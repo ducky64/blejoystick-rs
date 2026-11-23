@@ -32,6 +32,7 @@ mod battery;
 mod ble_descriptors;
 mod ble_peripheral;
 mod bus;
+mod dfu;
 mod leds;
 mod imu;
 mod joystick;
@@ -55,7 +56,7 @@ use embassy_nrf::twim::{self, Twim};
 
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::RNG;
-use embassy_nrf::{bind_interrupts, peripherals, rng, saadc};
+use embassy_nrf::{bind_interrupts, peripherals, rng, saadc, usb};
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
 
@@ -77,7 +78,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 
-bind_interrupts!(struct Irqs {
+bind_interrupts!(pub(crate) struct Irqs {
     // BLE stack interrupts
     RNG => rng::InterruptHandler<RNG>;
     EGU0_SWI0 => nrf_sdc::mpsl::LowPrioInterruptHandler;
@@ -88,6 +89,7 @@ bind_interrupts!(struct Irqs {
     // application interrupts
     SAADC => saadc::InterruptHandler;
     TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
+    USBD => usb::InterruptHandler<peripherals::USBD>;
 });
 
 #[embassy_executor::task]
@@ -124,6 +126,9 @@ fn build_sdc<'d, const N: usize>(
 async fn main(spawner: Spawner) {
     let mut p = embassy_nrf::init(Default::default());
     info!("Starting!");
+
+    // take over the bootloader's watchdog as early as possible
+    spawner.spawn(unwrap!(dfu::wdt_task(p.WDT)));
 
     // initialize global state and shared peripherals
     let flash = Nvmc::new(p.NVMC);
@@ -193,6 +198,9 @@ async fn main(spawner: Spawner) {
         mpsl_p, Irqs, lfclk_cfg
     )));
     spawner.spawn(unwrap!(mpsl_task(&*mpsl)));
+
+    // USB DFU needs the MPSL to manage the HFCLK
+    spawner.spawn(unwrap!(dfu::usb_task(bus, &*mpsl, p.USBD)));
 
     let sdc_p = sdc::Peripherals::new(
         p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,

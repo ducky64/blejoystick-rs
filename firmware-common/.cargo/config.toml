@@ -1,0 +1,3 @@
+# only built as a dependency of firmware-main / firmware-bootloader; this lets `cargo build` / `cargo check` work here too
+[build]
+target = "thumbv7em-none-eabihf"
