@@ -379,7 +379,8 @@ async fn joystick_task<C: Controller, P: PacketPool>(
         last_tick = now;
 
         let trig_delta = trig_accum.update(sensitivity_mapping(joystick.trig), dt);
-        let x_delta = x_accum.update(sensitivity_mapping(joystick.x), dt);
+        // x axis hardware broken, temporarily disabled
+        let _x_delta = x_accum.update(sensitivity_mapping(joystick.x), dt);
         let y_delta = y_accum.update(sensitivity_mapping(joystick.y), dt);
 
         // handle buttons
@@ -401,7 +402,7 @@ async fn joystick_task<C: Controller, P: PacketPool>(
             x: 0,
             y: 0,
             wheel: -y_delta - trig_delta,
-            pan: x_delta,
+            pan: 0  // x_delta,
         };
 
         if report == last_report && !report.relative_changed() {
