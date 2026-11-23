@@ -60,8 +60,6 @@ pub struct OverwriteDfuHandler<
 > {
     inner: FirmwareHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>,
     state: BlockingFirmwareState<'d, STATE>,
-    reset_requested: &'d Cell<bool>,
-    started: bool,
     bytes: usize,
 }
 
@@ -70,18 +68,8 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
 {
     /// `inner` must have been created with an updater whose DFU partition is ACTIVE (its reset is
     /// never used). `state` must be the same state partition as the updater's.
-    pub fn new(
-        inner: FirmwareHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>,
-        state: BlockingFirmwareState<'d, STATE>,
-        reset_requested: &'d Cell<bool>,
-    ) -> Self {
-        Self {
-            inner,
-            state,
-            reset_requested,
-            started: false,
-            bytes: 0,
-        }
+    pub fn new(inner: FirmwareHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>, state: BlockingFirmwareState<'d, STATE>) -> Self {
+        Self { inner, state, bytes: 0 }
     }
 }
 
@@ -89,15 +77,6 @@ impl<'d, ACTIVE: NorFlash, STATE: NorFlash, RST: Reset, const BLOCK_SIZE: usize>
     for OverwriteDfuHandler<'d, ACTIVE, STATE, RST, BLOCK_SIZE>
 {
     fn start(&mut self) -> Result<(), Status> {
-        if self.started {
-            // The embassy-boot updater remembers the last erased sector across downloads, so a
-            // second download in the same session could skip an erase. Start over from a reset
-            // instead (the state is still DfuDetach, so this comes back up in DFU mode).
-            defmt::warn!("DFU: second download in one session, resetting");
-            self.reset_requested.set(true);
-            return Err(Status::ErrUnknown);
-        }
-        self.started = true;
         self.bytes = 0;
 
         // invalidate the image before the first erase

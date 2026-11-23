@@ -128,7 +128,7 @@ fn run_dfu(
     );
     let state = BlockingFirmwareState::new(state_partition(flash), &mut state_buf.0);
     let mut dfu_state = DfuState::new(
-        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state, &reset_requested),
+        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state),
         dfu_attributes(),
     );
 
