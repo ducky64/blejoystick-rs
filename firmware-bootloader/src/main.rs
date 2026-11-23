@@ -18,10 +18,13 @@ use core::task::Poll;
 
 use cortex_m_rt::{entry, exception};
 use defmt_rtt as _;
-use embassy_boot_nrf::{BlockingFirmwareState, BlockingFirmwareUpdater, BootLoader, FirmwareUpdaterConfig};
+use embassy_boot_nrf::{
+    BlockingFirmwareState, BlockingFirmwareUpdater, BootLoader, FirmwareUpdaterConfig,
+};
 use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_futures::block_on;
 use embassy_futures::select::select;
+use embassy_nrf::gpio::{Level, Output, OutputDrive};
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::usb::vbus_detect::{self, HardwareVbusDetect};
 use embassy_nrf::usb::{self, Driver};
@@ -63,6 +66,8 @@ fn active_partition(flash: &SharedFlash) -> FlashPartition<'_> {
 #[entry]
 fn main() -> ! {
     let p = embassy_nrf::init(Default::default());
+    // keep power active during DFU / bootloader
+    let _pwr_gate = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
 
     let Some(mut wdt) = try_wdt(p.WDT) else {
         defmt::error!("WDT: already running with a different config, waiting for reset");
@@ -129,13 +134,23 @@ fn run_dfu(
     );
     let state = BlockingFirmwareState::new(state_partition(flash), &mut state_buf.0);
     let mut dfu_state = DfuState::new(
-        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(FirmwareHandler::new(updater, ResetImmediate), state),
+        OverwriteDfuHandler::<_, _, _, DFU_BLOCK_SIZE>::new(
+            FirmwareHandler::new(updater, ResetImmediate),
+            state,
+        ),
         dfu_attributes(),
     );
 
     let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
     let config = usb_config("blejoystick-rs bootloader", Some(USB_SERIAL_DFU));
-    let mut builder = embassy_usb::Builder::new(driver, config, &mut config_desc, &mut bos_desc, &mut msos_desc, &mut control_buf);
+    let mut builder = embassy_usb::Builder::new(
+        driver,
+        config,
+        &mut config_desc,
+        &mut bos_desc,
+        &mut msos_desc,
+        &mut control_buf,
+    );
     msos_winusb(&mut builder);
     // before the DFU class, which would otherwise accept (and ignore) DFU_DETACH
     builder.handler(&mut reset_handler);
