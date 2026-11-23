@@ -51,7 +51,7 @@ pub type NvSettings = SeqNvmSettings<Settings, StorageFlash, NoCache, 0, 0, SETT
 pub struct GlobalBus {
     pub flash: &'static SharedFlash,
 
-    /// Persistent settings. Must be loaded with [`load_settings`] before use.
+    /// Persistent settings. Must be loaded with [`GlobalBus::load_settings`] before use.
     pub settings: NvSettings,
 
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
@@ -111,15 +111,14 @@ impl GlobalBus {
         let now = embassy_time::Instant::now().as_micros() as u64;
         self.last_activity.store(now, Ordering::Relaxed);
     }
-}
 
-/// Loads persistent settings from flash into the settings cache.
-/// On failure, settings are left at defaults.
-pub async fn load_settings(bus: &'static GlobalBus) {
-    match bus.settings.load().await {
-        Ok(true) => info!("Loaded settings: {}", bus.settings.get()),
-        Ok(false) => info!("No stored settings found, using defaults"),
-        Err(e) => error!("Failed to load settings: {}", defmt::Debug2Format(&e)),
+    /// Loads persistent settings from flash into the settings cache.
+    /// On failure, settings are left at defaults.
+    pub async fn load_settings(&self) {
+        match self.settings.load().await {
+            Ok(true) => info!("Loaded settings: {}", self.settings.get()),
+            Ok(false) => info!("No stored settings found, using defaults"),
+            Err(e) => error!("Failed to load settings: {}", defmt::Debug2Format(&e)),
+        }
     }
 }
-

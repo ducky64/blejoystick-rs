@@ -134,7 +134,7 @@ async fn main(spawner: Spawner) {
     // initialize global state and shared peripherals
     let flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
-    bus::load_settings(bus).await;
+    bus.load_settings().await;
 
     // Shared I2C bus
     let mut twi_config = twim::Config::default();
