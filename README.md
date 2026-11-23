@@ -6,4 +6,4 @@ In `firmware-bootloader`, `cargo run --release` (release needed to fit code with
 
 In `firmware-main`, `cargo run` (flash over SWD). This preserves the bootloader and settings partitions.
 
-For future updates over USB DFU, in `firmware-main`, `cargo dfu` (rebuilds, generates .bin, and invokes `dfu-util`). Requires `dfu-util`.
+For future updates over USB DFU, in `firmware-main`, `cargo dfu` (rebuilds, generates .bin, and invokes `dfu-util`). Requires `dfu-util` and `rust-objcopy` (`cargo install cargo-binutils` and `rustup component add llvm-tools`) on PATH.

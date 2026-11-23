@@ -16,3 +16,10 @@ attach = [
   "--config",
   "target.thumbv7em-none-eabihf.runner = 'probe-rs attach --chip nRF52840_xxAA --speed 16000'",
 ]
+# flash over USB DFU instead of SWD: `cargo dfu` (see the README)
+# 1209:0001 must match USB_VID/USB_PID in firmware-common
+dfu = [
+  "run",
+  "--config",
+  "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/dfu-runner.rs 1209:0001'",
+]
