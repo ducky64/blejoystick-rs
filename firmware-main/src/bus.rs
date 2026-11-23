@@ -1,20 +1,22 @@
 use core::cell::RefCell;
 use core::sync::atomic::Ordering;
 
-use defmt::Format;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
-use embassy_sync::{blocking_mutex, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch, semaphore::GreedySemaphore};
+use embassy_sync::{blocking_mutex, blocking_mutex::raw::CriticalSectionRawMutex, watch::Watch, semaphore::GreedySemaphore};
 use fixed::types::I1F15;
 use portable_atomic::{AtomicU64};
+use embedded_nvm_settings::{SeqNvmSettings, SeqStorageBackend, VersionedPostcardFormat};
 use sequential_storage::{
-    cache::{Cache, Uncached},
-    map::{Key, MapConfig, MapStorage, SerializationError},
+    cache::NoCache,
+    map::{MapConfig, MapStorage},
 };
 use static_cell::StaticCell;
-use strum::FromRepr;
+
+use crate::prelude::*;
+use crate::settings::{Settings, SETTINGS_BUF_SIZE};
 
 #[derive(Clone, Copy, Default)]
 pub struct JoystickState {
@@ -32,42 +34,6 @@ pub struct ImuUpdate {
     pub btn: bool,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Format, FromRepr)]
-#[repr(u8)]
-pub enum StorageKey {
-    // 0 is reserved
-    BondingInfo = 1,
-
-    Unknown = 127,
-}
-
-impl Key for StorageKey {
-    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        if buffer.len() < 1 {
-            return Err(SerializationError::BufferTooSmall);
-        }
-        buffer[0] = *self as u8;
-        Ok(1) // used 1 byte
-    }
-
-    fn deserialize_from(buffer: &[u8]) -> Result<(Self, usize), SerializationError> {
-        if buffer.len() < 1 {
-            return Err(SerializationError::BufferTooSmall);
-        }
-        let key = Self::from_repr(buffer[0]);
-
-        if let Some(key) = key {
-            Ok((key, 1))
-        } else {
-            Ok((StorageKey::Unknown, 1))
-        }
-    }
-
-    fn get_len(_buffer: &[u8]) -> Result<usize, SerializationError> {
-        Ok(1)
-    }
-}
-
 /// The internal flash, shared between persistent storage and the firmware updater.
 /// All flash operations are blocking, so this lock is never held across an await.
 pub type SharedFlash = blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Nvmc<'static>>>;
@@ -75,17 +41,18 @@ pub type SharedFlash = blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Nv
 /// A region of the shared flash, addressed relative to the start of the region.
 pub type FlashPartition = BlockingPartition<'static, CriticalSectionRawMutex, Nvmc<'static>>;
 
+type StorageFlash = BlockingAsync<FlashPartition>;
+
+/// Persistent settings, stored in the STORAGE partition.
+/// The NVM_START / NVM_SIZE const parameters are 0 since they are unused: the storage is built
+/// with `SeqStorageBackend::from_storage` using the partition range from the linker symbols.
+pub type NvSettings = SeqNvmSettings<Settings, StorageFlash, NoCache, 0, 0, SETTINGS_BUF_SIZE>;
+
 pub struct GlobalBus {
     pub flash: &'static SharedFlash,
 
-    pub storage: Mutex<
-        CriticalSectionRawMutex,
-        MapStorage<
-            StorageKey,
-            BlockingAsync<FlashPartition>,
-            Cache<Uncached, Uncached, Uncached, StorageKey>,
-        >,
-    >,
+    /// Persistent settings. Must be loaded with [`GlobalBus::load_settings`] before use.
+    pub settings: NvSettings,
 
     pub joystick_state: Watch<CriticalSectionRawMutex, JoystickState, 2>,
     pub buttons_state: Watch<CriticalSectionRawMutex, u8, 2>,  // bitmask of buttons
@@ -109,15 +76,18 @@ pub fn init(flash: Nvmc<'static>) -> &'static GlobalBus {
     // STORAGE region from memory.x, unchanged from the pre-bootloader layout (0xFE000..0x100000)
     let storage_partition = firmware_common::linker_partition!(flash, __storage_start, __storage_end);
     let storage_size = storage_partition.size();
-    let storage = MapStorage::<StorageKey, _, _>::new(
-        BlockingAsync::new(storage_partition),
-        MapConfig::new(0..storage_size),
-        Cache::new_uncached(),
+    let settings = NvSettings::new(
+        SeqStorageBackend::from_storage(MapStorage::new(
+            BlockingAsync::new(storage_partition),
+            MapConfig::new(0..storage_size),
+            NoCache::new(),
+        )),
+        VersionedPostcardFormat,
     );
 
     BUS.init(GlobalBus {
         flash,
-        storage: Mutex::new(storage),
+        settings,
 
         joystick_state: Watch::new(),
         buttons_state: Watch::new(),
@@ -140,5 +110,15 @@ impl GlobalBus {
     pub fn activity(&self) {
         let now = embassy_time::Instant::now().as_micros() as u64;
         self.last_activity.store(now, Ordering::Relaxed);
+    }
+
+    /// Loads persistent settings from flash into the settings cache.
+    /// On failure, settings are left at defaults.
+    pub async fn load_settings(&self) {
+        match self.settings.load().await {
+            Ok(true) => info!("Loaded settings: {}", self.settings.get()),
+            Ok(false) => info!("No stored settings found, using defaults"),
+            Err(e) => error!("Failed to load settings: {}", defmt::Debug2Format(&e)),
+        }
     }
 }

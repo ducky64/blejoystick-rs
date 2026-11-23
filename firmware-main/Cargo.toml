@@ -13,20 +13,54 @@ path = "./src/main.rs"
 # Cargo.toml block from trouble nrf52 example
 # with these features added for trouble-host: "defmt", "security", "serde"
 
-embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "defmt", "executor-interrupt"] }
-embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-nrf = { version = "0.11", default-features = false, features = ["defmt", "time-driver-rtc1", "gpiote", "unstable-pac", "rt", "nrf52840", "nfc-pins-as-gpio"] }
+embassy-executor = { version = "0.10", default-features = false, features = [
+    "platform-cortex-m",
+    "executor-thread",
+    "defmt",
+    "executor-interrupt",
+] }
+embassy-time = { version = "0.5", default-features = false, features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+embassy-nrf = { version = "0.11", default-features = false, features = [
+    "defmt",
+    "time-driver-rtc1",
+    "gpiote",
+    "unstable-pac",
+    "rt",
+    "nrf52840",
+    "nfc-pins-as-gpio",
+] }
 embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 
-futures = { version = "0.3", default-features = false, features = ["async-await"]}
-nrf-sdc = { version = "0.4", default-features = false, features = ["defmt", "peripheral", "nrf52840"] }
-nrf-mpsl = { version = "0.4", default-features = false, features = ["defmt", "critical-section-impl", "nrf52840"] }
+futures = { version = "0.3", default-features = false, features = [
+    "async-await",
+] }
+nrf-sdc = { version = "0.4", default-features = false, features = [
+    "defmt",
+    "peripheral",
+    "nrf52840",
+] }
+nrf-mpsl = { version = "0.4", default-features = false, features = [
+    "defmt",
+    "critical-section-impl",
+    "nrf52840",
+] }
 bt-hci = { version = "0.10", default-features = false, features = ["defmt"] }
-trouble-host = { version = "0.8", default-features = false, features = ["derive", "gatt", "peripheral", "default-packet-pool", "defmt", "security", "serde"] }
+trouble-host = { version = "0.8", default-features = false, features = [
+    "derive",
+    "gatt",
+    "peripheral",
+    "default-packet-pool",
+    "defmt",
+    "security",
+    "serde",
+] }
 
 defmt = "1.0"
-defmt-rtt = { version = "1.0", features=["disable-blocking-mode"] }
+defmt-rtt = { version = "1.0", features = ["disable-blocking-mode"] }
 panic-probe = { version = "1.0", features = ["print-defmt"] }
 
 cortex-m = { version = "0.7.6" }
@@ -36,15 +70,23 @@ static_cell = "2"
 # end Cargo.toml block from trouble nrf52 example
 
 heapless = { version = "0.9", features = ["serde"] }
-strum = { version = "0.27", features = ["derive"], default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
-ssmarshal = { version = "1.0", default-features = false }                     # for packing BLE wire formats
+ssmarshal = { version = "1.0", default-features = false }                  # for packing BLE wire formats
 
 fixed = { version = "1.30.0", features = ["defmt"] }
 
-# for BLE 'security' feature
-sequential-storage = { version = "8.0", features = [
-    "postcard",
+# persistent settings (bonding info), see src/settings.rs
+# sequential-storage is pinned to 7.x to match embedded-nvm-settings 0.1.
+embedded-nvm-settings = { version = "0.1", features = [
+    "sequential-storage",
+    "versioned-postcard",
+    "defmt",
+] }
+versioned-postcard = { version = "0.1", features = ["defmt", "max-size"] }
+postcard = { version = "1.1", default-features = false, features = ["experimental-derive"] }
+tinyvec = { version = "1.10", features = ["serde", "defmt", "rustc_1_55"] }
+sequential-storage = { version = "7.1", features = [
+    "defmt",
 ], default-features = false }
 rand_core = { version = "0.6", default-features = false }
 rand_chacha = { version = "0.3", default-features = false }
@@ -57,7 +99,11 @@ embassy-embedded-hal = "0.6.0"
 # bootloader / USB DFU
 embassy-boot = { version = "0.7", features = ["defmt"] }
 embassy-usb = { version = "0.6", features = ["defmt"] }
-embassy-usb-dfu = { version = "0.3", features = ["application", "cortex-m", "defmt"] }
+embassy-usb-dfu = { version = "0.3", features = [
+    "application",
+    "cortex-m",
+    "defmt",
+] }
 embedded-storage = "0.3"
 # peripherals
 # embedded-hal = "1.0"

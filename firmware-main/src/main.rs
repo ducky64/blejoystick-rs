@@ -37,6 +37,7 @@ mod leds;
 mod imu;
 mod joystick;
 mod prelude;
+mod settings;
 mod util;
 mod expander;
 use crate::leds::{battery_led_task, io_led_task};
@@ -133,6 +134,7 @@ async fn main(spawner: Spawner) {
     // initialize global state and shared peripherals
     let flash = Nvmc::new(p.NVMC);
     let bus = bus::init(flash);
+    bus.load_settings().await;
 
     // Shared I2C bus
     let mut twi_config = twim::Config::default();

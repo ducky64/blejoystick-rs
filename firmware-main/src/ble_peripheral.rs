@@ -1,19 +1,17 @@
-use defmt::Format;
 use embassy_futures::join::join;
 use embassy_futures::select::select3;
 use embassy_time::{Duration, Instant, Timer};
+use defmt::Format;
 use fixed::types::{I16F16, I1F15};
-use heapless::LinearMap;
-
-use sequential_storage::map::PostcardValue;
+use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
+use tinyvec::ArrayVec;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::AsInputReport;
 
 use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
-use crate::bus::{GlobalBus, StorageKey};
+use crate::bus::GlobalBus;
 use crate::prelude::*;
-use crate::util::FormatLinearMap;
 
 /// Max number of connections
 const CONNECTIONS_MAX: usize = 1;
@@ -23,33 +21,54 @@ const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
 
 const STORED_CCCD_MAX: usize = 8;
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Format)]
-struct StoredBondInformation {
-    bond_info: BondInformation,
-    cccds: FormatLinearMap<u16, u16, STORED_CCCD_MAX>,
+/// Persistent bond information, stored in [`crate::settings::Settings`].
+/// Holds the fields of `BondInformation` (which is not `Copy`, as required by settings) directly.
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, Format)]
+pub struct StoredBondInformation {
+    ltk: LongTermKey,
+    identity: Identity,
+    is_bonded: bool,
+    security_level: SecurityLevel,
+    cccds: ArrayVec<[(u16, u16); STORED_CCCD_MAX]>, // (handle, value)
 }
-impl<'a> PostcardValue<'a> for StoredBondInformation {}
+
+impl MaxSize for StoredBondInformation {
+    // TrouBLE types do not implement MaxSize, so this mirrors their (derived) serde layout
+    const POSTCARD_MAX_SIZE: usize = u128::POSTCARD_MAX_SIZE  // ltk: LongTermKey(u128)
+        + u8::POSTCARD_MAX_SIZE + <[u8; 6]>::POSTCARD_MAX_SIZE  // identity.addr: Address { AddrKind(u8), BdAddr([u8; 6]) }
+        + <Option<core::num::NonZeroU128>>::POSTCARD_MAX_SIZE  // identity.irk: Option<IdentityResolvingKey(NonZeroU128)>
+        + bool::POSTCARD_MAX_SIZE  // is_bonded
+        + u8::POSTCARD_MAX_SIZE  // security_level: 3-variant enum, 1-byte varint discriminant
+        + usize::POSTCARD_MAX_SIZE + STORED_CCCD_MAX * <(u16, u16)>::POSTCARD_MAX_SIZE; // cccds: length + elements
+}
 
 impl StoredBondInformation {
     pub fn from_bond_info(bond_info: BondInformation) -> Self {
         Self {
-            bond_info: bond_info,
-            cccds: FormatLinearMap(LinearMap::new()),
+            ltk: bond_info.ltk,
+            identity: bond_info.identity,
+            is_bonded: bond_info.is_bonded,
+            security_level: bond_info.security_level,
+            cccds: ArrayVec::new(),
         }
     }
 
     pub fn added_cccd(&self, handle: u16, value: u16) -> Self {
-        let mut new = self.clone();
-        new.cccds.0.insert(handle, value).ok();
+        let mut new = *self;
+        if let Some(entry) = new.cccds.iter_mut().find(|(h, _)| *h == handle) {
+            entry.1 = value;
+        } else if new.cccds.try_push((handle, value)).is_some() {
+            warn!("cccd table full, dropping {} = {}", handle, value);
+        }
         new
     }
 
-    pub fn bond_info(&self) -> &BondInformation {
-        &self.bond_info
+    pub fn bond_info(&self) -> BondInformation {
+        BondInformation::new(self.identity, self.ltk, self.security_level, self.is_bonded)
     }
 
-    pub fn cccds(&self) -> &LinearMap<u16, u16, STORED_CCCD_MAX> {
-        &self.cccds.0
+    pub fn cccds(&self) -> &[(u16, u16)] {
+        &self.cccds
     }
 }
 
@@ -69,21 +88,9 @@ where
         .set_random_address(address)
         .build();
 
-    let stored_bond_info = {
-        let mut storage = bus.storage.lock().await;
-        let mut buf = [0u8; 128];
-        storage
-            .fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo)
-            .await
-            .inspect_err(|e| error!("error reading bonding info {}", defmt::Debug2Format(e)))
-            .ok()
-            .flatten()
-    };
-    if let Some(stored_bond_info) = stored_bond_info {
+    if let Some(stored_bond_info) = bus.settings.get().bond {
         info!("Loaded bond information: {}", stored_bond_info);
-        stack
-            .add_bond_information(stored_bond_info.bond_info().clone())
-            .unwrap();
+        stack.add_bond_information(stored_bond_info.bond_info()).unwrap();
     } else {
         info!("No bond information found");
     };
@@ -155,22 +162,16 @@ async fn gatt_events_task(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
 ) -> Result<(), Error> {
-    let mut stored_bond_info = {
-        let mut storage = bus.storage.lock().await;
-        let mut buf = [0u8; 128];
-        storage
-            .fetch_item::<StoredBondInformation>(&mut buf, &StorageKey::BondingInfo)
-            .await
-            .inspect_err(|e| error!("error reading bonding info {}", defmt::Debug2Format(e)))
-            .ok()
-            .flatten()
-            .filter(|value| {
-                value
-                    .bond_info()
-                    .identity
-                    .match_address(&conn.raw().peer_address())
-            })
-    };
+    let mut stored_bond_info = bus
+        .settings
+        .get()
+        .bond
+        .filter(|value| {
+            value
+                .bond_info()
+                .identity
+                .match_address(&conn.raw().peer_address())
+        });
 
     // TODO delay restoring cccd until encryption confirmed
     stored_bond_info.as_ref().map(|stored_bond_info| {
@@ -271,19 +272,17 @@ async fn gatt_events_task(
             if Some(updated_bond_info) == stored_bond_info.as_ref() {
                 continue; // data not changed
             }
-            let result = {
-                let mut storage = bus.storage.lock().await;
-                let mut buf = [0u8; 128];
-                storage
-                    .store_item(&mut buf, &StorageKey::BondingInfo, updated_bond_info)
-                    .await
-            };
-            if result.is_ok() {
-                info!("[gatt] wrote updated bond info: {}", updated_bond_info);
-                stored_bond_info = new_stored_bond_info;
-            } else {
-                error!("[gatt] failed to write updated bond info")
+            let updated_bond_info = *updated_bond_info;
+            bus.settings.update(|mut s| {
+                s.bond = Some(updated_bond_info);
+                s
+            });
+            match bus.settings.commit().await {
+                Ok(()) => info!("[gatt] wrote updated bond info: {}", updated_bond_info),
+                // the settings cache remains dirty, so the next commit retries
+                Err(e) => error!("[gatt] failed to write updated bond info: {}", defmt::Debug2Format(&e)),
             }
+            stored_bond_info = new_stored_bond_info;
         }
     };
     info!("[gatt] disconnected: {:?}", reason);
