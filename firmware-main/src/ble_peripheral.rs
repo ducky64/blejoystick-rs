@@ -1,20 +1,76 @@
 use embassy_futures::join::join;
 use embassy_futures::select::select3;
 use embassy_time::{Duration, Instant, Timer};
+use defmt::Format;
 use fixed::types::{I16F16, I1F15};
+use postcard::experimental::max_size::MaxSize;
+use serde::{Deserialize, Serialize};
+use tinyvec::ArrayVec;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::AsInputReport;
 
 use crate::ble_descriptors::{MouseReport, Server, DEVICE_NAME};
 use crate::bus::GlobalBus;
 use crate::prelude::*;
-use crate::settings::StoredBond;
 
 /// Max number of connections
 const CONNECTIONS_MAX: usize = 1;
 
 /// Max number of L2CAP channels.
 const L2CAP_CHANNELS_MAX: usize = 4; // Signal + att
+
+const STORED_CCCD_MAX: usize = 8;
+
+/// Persistent bond information, stored in [`crate::settings::Settings`].
+/// Holds the fields of `BondInformation` (which is not `Copy`, as required by settings) directly.
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, Format)]
+pub struct StoredBondInformation {
+    ltk: LongTermKey,
+    identity: Identity,
+    is_bonded: bool,
+    security_level: SecurityLevel,
+    cccds: ArrayVec<[(u16, u16); STORED_CCCD_MAX]>, // (handle, value)
+}
+
+impl MaxSize for StoredBondInformation {
+    // TrouBLE types do not implement MaxSize, so this mirrors their (derived) serde layout
+    const POSTCARD_MAX_SIZE: usize = u128::POSTCARD_MAX_SIZE  // ltk: LongTermKey(u128)
+        + u8::POSTCARD_MAX_SIZE + <[u8; 6]>::POSTCARD_MAX_SIZE  // identity.addr: Address { AddrKind(u8), BdAddr([u8; 6]) }
+        + <Option<core::num::NonZeroU128>>::POSTCARD_MAX_SIZE  // identity.irk: Option<IdentityResolvingKey(NonZeroU128)>
+        + bool::POSTCARD_MAX_SIZE  // is_bonded
+        + u8::POSTCARD_MAX_SIZE  // security_level: 3-variant enum, 1-byte varint discriminant
+        + usize::POSTCARD_MAX_SIZE + STORED_CCCD_MAX * <(u16, u16)>::POSTCARD_MAX_SIZE; // cccds: length + elements
+}
+
+impl StoredBondInformation {
+    pub fn from_bond_info(bond_info: BondInformation) -> Self {
+        Self {
+            ltk: bond_info.ltk,
+            identity: bond_info.identity,
+            is_bonded: bond_info.is_bonded,
+            security_level: bond_info.security_level,
+            cccds: ArrayVec::new(),
+        }
+    }
+
+    pub fn added_cccd(&self, handle: u16, value: u16) -> Self {
+        let mut new = *self;
+        if let Some(entry) = new.cccds.iter_mut().find(|(h, _)| *h == handle) {
+            entry.1 = value;
+        } else if new.cccds.try_push((handle, value)).is_some() {
+            warn!("cccd table full, dropping {} = {}", handle, value);
+        }
+        new
+    }
+
+    pub fn bond_info(&self) -> BondInformation {
+        BondInformation::new(self.identity, self.ltk, self.security_level, self.is_bonded)
+    }
+
+    pub fn cccds(&self) -> &[(u16, u16)] {
+        &self.cccds
+    }
+}
 
 /// Run the BLE stack.
 pub async fn run<'a, C>(bus: &'static GlobalBus, controller: C)
@@ -32,9 +88,9 @@ where
         .set_random_address(address)
         .build();
 
-    if let Some(stored_bond) = bus.settings.get().bond {
-        info!("Loaded bond information: {}", stored_bond);
-        stack.add_bond_information(stored_bond.bond_info()).unwrap();
+    if let Some(stored_bond_info) = bus.settings.get().bond {
+        info!("Loaded bond information: {}", stored_bond_info);
+        stack.add_bond_information(stored_bond_info.bond_info()).unwrap();
     } else {
         info!("No bond information found");
     };
@@ -110,13 +166,18 @@ async fn gatt_events_task(
         .settings
         .get()
         .bond
-        .filter(|bond| bond.identity.match_address(&conn.raw().peer_address()));
+        .filter(|value| {
+            value
+                .bond_info()
+                .identity
+                .match_address(&conn.raw().peer_address())
+        });
 
     // TODO delay restoring cccd until encryption confirmed
     stored_bond_info.as_ref().map(|stored_bond_info| {
         info!("[gatt] restoring stored bond info: {:?}", stored_bond_info);
         let mut att_table = server.get_client_att_table(conn.raw()).unwrap();
-        stored_bond_info.cccds.iter().for_each(|(handle, value)| {
+        stored_bond_info.cccds().iter().for_each(|(handle, value)| {
             att_table.write(*handle, 0, &value.to_le_bytes()).inspect_err(|e| 
                 error!("error restoring cccd {} = {}: {:?}", handle, value, e)).ok();
         });
@@ -125,7 +186,7 @@ async fn gatt_events_task(
 
     let reason = loop {
         let conn_event = conn.next().await;
-        let mut new_stored_bond_info: Option<StoredBond> = None;
+        let mut new_stored_bond_info: Option<StoredBondInformation> = None;
 
         match conn_event {
             GattConnectionEvent::Disconnected { reason } => {
@@ -138,7 +199,7 @@ async fn gatt_events_task(
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    new_stored_bond_info = Some(StoredBond::from_bond_info(&bond));
+                    new_stored_bond_info = Some(StoredBondInformation::from_bond_info(bond));
                 }
             }
             GattConnectionEvent::PairingFailed(err) => {
@@ -198,7 +259,7 @@ async fn gatt_events_task(
                             let value_u16 = u16::from_le_bytes([*b0, *b1]);
                             info!("cccd changed => {}={}", cccd_handle, value_u16);
                             new_stored_bond_info =
-                                Some(stored_bond_info.with_cccd(cccd_handle, value_u16));
+                                Some(stored_bond_info.added_cccd(cccd_handle, value_u16));
                         }
                     }
                 }
