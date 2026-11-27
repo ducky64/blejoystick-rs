@@ -57,9 +57,15 @@ mod logger {
         encoder: UnsafeCell::new(defmt::Encoder::new()),
     };
 
-    fn write_pipe(bytes: &[u8]) {
-        // drops whatever doesn't fit
-        let _ = PIPE.try_write(bytes);
+    /// Writes as much of `bytes` as fits, and drops the rest.
+    fn write_pipe(mut bytes: &[u8]) {
+        // TODO replace with Pipe::try_write_all, once it releases
+        while let Ok(n) = PIPE.try_write(bytes) {
+            bytes = &bytes[n..];
+            if bytes.is_empty() {
+                break;
+            }
+        }
     }
 
     unsafe impl defmt::Logger for Logger {
