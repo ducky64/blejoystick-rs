@@ -14,14 +14,7 @@ use embassy_usb::driver::{Driver, EndpointError, Speed};
 use embassy_usb::Builder;
 use static_cell::StaticCell;
 
-/// CDC ACM bulk endpoint packet size: 64, the full-speed maximum (the nRF52840 USBD is
-/// full-speed only). embassy-usb's helper is meant for EP0, but full-speed bulk endpoints have the
-/// same 64-byte maximum.
 const MAX_PACKET_SIZE: u16 = Speed::Full.max_packet_size();
-
-/// Largest packet actually sent: one short of [`MAX_PACKET_SIZE`], so every packet is short and
-/// ends its transfer by itself. A full packet would need a zero-length packet (ZLP) after to flush.
-const SEND_SIZE: usize = MAX_PACKET_SIZE as usize - 1;
 
 /// Encoded defmt frames waiting for the host.
 static PIPE: Pipe<CriticalSectionRawMutex, 4096> = Pipe::new();
@@ -129,6 +122,9 @@ pub(crate) async fn writer<D: Driver<'static>>(log: UsbLog<D>) -> ! {
 
 /// Streams the pipe to the host until the endpoint is disabled.
 async fn stream<D: Driver<'static>>(sender: &mut Sender<'static, D>) -> Result<(), EndpointError> {
+    /// one short of the max, to avoid a zero-length packet to clush
+    const SEND_SIZE: usize = MAX_PACKET_SIZE as usize - 1;  
+
     if cfg!(feature = "defmt-rtt") {
         for chunk in RTT_NOTICE.chunks(SEND_SIZE) {
             sender.write_packet(chunk).await?;
