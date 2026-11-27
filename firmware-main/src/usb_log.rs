@@ -111,9 +111,7 @@ pub(crate) fn add_class<D: Driver<'static>>(builder: &mut Builder<'static, D>) -
     UsbLog { sender }
 }
 
-/// Sends logs to the host whenever the device is configured. Until the host reads (opens the
-/// port), writes block and the pipe holds the logs.
-/// Runs for as long as the USB device exists, and waits while it's stopped (eg, no VBUS).
+/// Sends logs to the host whenever the device is configured.
 pub(crate) async fn writer<D: Driver<'static>>(log: UsbLog<D>) -> ! {
     let UsbLog { mut sender } = log;
     loop {
