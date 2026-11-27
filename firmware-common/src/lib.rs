@@ -23,6 +23,7 @@ use embassy_usb::driver::Driver;
 use embassy_usb::msos::{self, windows_version};
 use embassy_usb::{Builder, FunctionBuilder};
 use embedded_storage::nor_flash::NorFlash;
+use static_cell::ConstStaticCell;
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
 /// bootloader's carries into the application. `None` if it's running with a different
@@ -43,30 +44,38 @@ pub const USB_VID: u16 = 0x1209;
 /// USB product ID, pid.codes test PID. TODO allocate a real one.
 pub const USB_PID: u16 = 0x0001;
 
-/// USB serial number of the bootloader's DFU mode. The application uses the chip's FICR DEVICEID.
-///
-/// Differs from the application's so the host sees DFU mode as a different device, and
-/// dfu-util sees the bootloader's DFU mode as a different device.
-pub const USB_SERIAL_DFU: &str = "DFU";
-
 /// bcdDevice of the bootloader's DFU mode (DFU interface only, embassy-usb's default).
+///
+/// The bootloader and the application share VID/PID and serial number; this tells them apart.
 pub const USB_DEVICE_RELEASE_BOOTLOADER: u16 = 0x0010;
 
 /// bcdDevice of the application (composite: DFU run-time interface and the USB log port).
 pub const USB_DEVICE_RELEASE_APP: u16 = 0x0011;
 
-/// USB device configuration, the same for the application's DFU run-time interface and the
-/// bootloader's DFU mode, apart from the product and serial number strings and the bcdDevice.
-pub fn usb_config(
-    product: &'static str,
-    serial_number: Option<&'static str>,
-    device_release: u16,
-) -> embassy_usb::Config<'static> {
+/// USB device configuration, the same for the application and the bootloader's DFU mode, apart
+/// from the product string and the bcdDevice.
+///
+/// The serial number is the chip's 64-bit FICR DEVICEID as 16 uppercase hex digits: unique per
+/// chip, so the host can tell boards (and their ports) apart, and the same for the bootloader and
+/// the application.
+///
+/// Call once: panics if called again, since the serial number's storage is a static.
+pub fn usb_config(product: &'static str, device_release: u16) -> embassy_usb::Config<'static> {
+    static SERIAL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
+    let serial = SERIAL.take();
+    let ficr = embassy_nrf::pac::FICR;
+    let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
+    for (i, digit) in serial.iter_mut().enumerate() {
+        let nibble = (id >> (60 - 4 * i)) & 0xF;
+        *digit = b"0123456789ABCDEF"[nibble as usize];
+    }
+
     let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
     config.device_release = device_release;
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
-    config.serial_number = serial_number;
+    // only ASCII hex digits
+    config.serial_number = Some(core::str::from_utf8(serial).unwrap());
     config.max_power = 100;
     config
 }

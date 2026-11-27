@@ -38,7 +38,7 @@ use embassy_usb_dfu::ResetImmediate;
 use embedded_storage::nor_flash::NorFlash;
 use firmware_common::{
     dfu_attributes, linker_partition, msos_winusb, state_buffer, try_wdt, usb_config,
-    DETACH_RESET_DELAY, MSOS_DESC_LEN, USB_DEVICE_RELEASE_BOOTLOADER, USB_SERIAL_DFU,
+    DETACH_RESET_DELAY, MSOS_DESC_LEN, USB_DEVICE_RELEASE_BOOTLOADER,
 };
 
 use crate::overwrite::{Action, HostResetHandler, OverwriteDfuHandler};
@@ -142,7 +142,7 @@ fn run_dfu(
     );
 
     let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
-    let config = usb_config("blejoystick-rs bootloader", Some(USB_SERIAL_DFU), USB_DEVICE_RELEASE_BOOTLOADER);
+    let config = usb_config("blejoystick-rs bootloader", USB_DEVICE_RELEASE_BOOTLOADER);
     let mut builder = embassy_usb::Builder::new(
         driver,
         config,

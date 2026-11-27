@@ -100,7 +100,7 @@ pub(crate) async fn usb_task(
     // VBUS is reported in software by charger_task, since the POWER interrupt belongs to the MPSL
     let driver = Driver::new(usbd, Irqs, &bus.vbus);
 
-    let config = usb_config("blejoystick-rs", Some(serial_number()), USB_DEVICE_RELEASE_APP);
+    let config = usb_config("blejoystick-rs", USB_DEVICE_RELEASE_APP);
 
     static CONFIG_DESC: ConstStaticCell<[u8; 512]> = ConstStaticCell::new([0; 512]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
@@ -142,18 +142,6 @@ pub(crate) async fn usb_task(
     };
     // the writer waits while the device is stopped between sessions
     join(sessions, crate::usb_log::writer(usb_log)).await;
-}
-
-/// USB serial number: the chip's 64-bit FICR DEVICEID, as 16 hex digits.
-fn serial_number() -> &'static str {
-    use core::fmt::Write;
-
-    let ficr = embassy_nrf::pac::FICR;
-    let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
-    static SERIAL: StaticCell<heapless::String<16>> = StaticCell::new();
-    let serial = SERIAL.init(heapless::String::new());
-    unwrap!(write!(serial, "{:016X}", id).map_err(|_| "serial number too long"));
-    serial.as_str()
 }
 
 type UsbPoweredReceiver = watch::Receiver<'static, CriticalSectionRawMutex, bool, 2>;

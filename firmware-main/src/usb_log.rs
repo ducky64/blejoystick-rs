@@ -5,14 +5,13 @@
 //! The pipe keeps logs from boot until a host opens the port.
 //!
 //! With `defmt-rtt`, nothing writes the pipe, and the port only sends [`RTT_NOTICE`] (plain text,
-//! for a terminal) when it's opened.
+//! for a terminal), once per USB connection, when the host first reads.
 //!
-//! Host side: `defmt-print -e <elf> serial --path <port> --dtr` (see the README).
+//! Host side: `defmt-print -e <elf> serial --path <port>`, or `cargo console` (see the README).
 
-use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
-use embassy_usb::class::cdc_acm::{CdcAcmClass, ControlChanged, Sender, State};
+use embassy_usb::class::cdc_acm::{CdcAcmClass, Sender, State};
 use embassy_usb::driver::{Driver, EndpointError};
 use embassy_usb::Builder;
 use static_cell::StaticCell;
@@ -23,7 +22,7 @@ const MAX_PACKET_SIZE: u16 = 64;
 /// Encoded defmt frames waiting for the host.
 static PIPE: Pipe<CriticalSectionRawMutex, 4096> = Pipe::new();
 
-/// Sent (instead of logs) each time the port is opened, when built with `defmt-rtt`.
+/// Sent (instead of logs) once per USB connection, when built with `defmt-rtt`.
 const RTT_NOTICE: &[u8] = b"\r\nblejoystick-rs: built with defmt-rtt, logs are on RTT (SWD)\r\n";
 
 /// The defmt global logger, into [`PIPE`]. Mutually exclusive with defmt-rtt's.
@@ -97,7 +96,6 @@ mod logger {
 /// The log port's sending half, from [`add_class`], run by [`writer`].
 pub(crate) struct UsbLog<D: Driver<'static>> {
     sender: Sender<'static, D>,
-    control: ControlChanged<'static>,
 }
 
 /// Adds the CDC ACM function (an IAD plus communication and data interfaces) to the USB device.
@@ -105,29 +103,24 @@ pub(crate) fn add_class<D: Driver<'static>>(builder: &mut Builder<'static, D>) -
     static CDC_STATE: StaticCell<State<'static>> = StaticCell::new();
     let class = CdcAcmClass::new(builder, CDC_STATE.init(State::new()), MAX_PACKET_SIZE);
     // the OUT endpoint is unused: the host's writes are ignored
-    let (sender, _receiver, control) = class.split_with_control();
-    UsbLog { sender, control }
+    let (sender, _receiver) = class.split();
+    UsbLog { sender }
 }
 
-/// Sends logs to the host whenever the device is configured and the host has the port open (DTR).
+/// Sends logs to the host whenever the device is configured. Until the host reads (opens the
+/// port), writes block and the pipe holds the logs.
 /// Runs for as long as the USB device exists, and waits while it's stopped (eg, no VBUS).
 pub(crate) async fn writer<D: Driver<'static>>(log: UsbLog<D>) -> ! {
-    let UsbLog { mut sender, control } = log;
+    let UsbLog { mut sender } = log;
     loop {
         sender.wait_connection().await;
-        while !control.dtr() {
-            control.control_changed().await;
-        }
-        // Err: disabled by a USB reset, suspend or VBUS loss, Ok: the host closed the port
-        let _ = stream(&mut sender, &control).await;
+        // Err: disabled by a USB reset, suspend or VBUS loss
+        let _ = stream(&mut sender).await;
     }
 }
 
-/// Streams the pipe to the host until it drops DTR or the endpoint is disabled.
-async fn stream<D: Driver<'static>>(
-    sender: &mut Sender<'static, D>,
-    control: &ControlChanged<'static>,
-) -> Result<(), EndpointError> {
+/// Streams the pipe to the host until the endpoint is disabled.
+async fn stream<D: Driver<'static>>(sender: &mut Sender<'static, D>) -> Result<(), EndpointError> {
     if cfg!(feature = "defmt-rtt") {
         for chunk in RTT_NOTICE.chunks(MAX_PACKET_SIZE as usize) {
             sender.write_packet(chunk).await?;
@@ -139,17 +132,12 @@ async fn stream<D: Driver<'static>>(
 
     let mut buf = [0u8; MAX_PACKET_SIZE as usize];
     loop {
-        match select(PIPE.read(&mut buf), control.control_changed()).await {
-            Either::First(n) => {
-                sender.write_packet(&buf[..n]).await?;
-                // a full packet doesn't end the transfer, so the host may hold it until a short
-                // one: send a zero-length packet if there's nothing more to send right now
-                if n == buf.len() && PIPE.is_empty() {
-                    sender.write_packet(&[]).await?;
-                }
-            }
-            Either::Second(()) if !control.dtr() => return Ok(()),
-            Either::Second(()) => {}
+        let n = PIPE.read(&mut buf).await;
+        sender.write_packet(&buf[..n]).await?;
+        // a full packet doesn't end the transfer, so the host may hold it until a short one:
+        // send a zero-length packet if there's nothing more to send right now
+        if n == buf.len() && PIPE.is_empty() {
+            sender.write_packet(&[]).await?;
         }
     }
 }

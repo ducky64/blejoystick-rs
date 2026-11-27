@@ -6,8 +6,10 @@ rust-version = "1.86"
 description = "Definitions shared by firmware-main and firmware-bootloader, which must agree on them"
 
 [dependencies]
-embassy-nrf = { version = "0.11", default-features = false, features = ["nrf52840"] }
+# unstable-pac: FICR, for the USB serial number
+embassy-nrf = { version = "0.11", default-features = false, features = ["nrf52840", "unstable-pac"] }
 embassy-boot = { version = "0.7", default-features = false }
 embassy-embedded-hal = { version = "0.6", default-features = false }
 embassy-usb = { version = "0.6", default-features = false }
 embedded-storage = "0.3"
+static_cell = "2"

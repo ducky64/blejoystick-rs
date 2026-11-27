@@ -33,5 +33,5 @@ console = [
   "run",
   "--no-default-features",
   "--config",
-  "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/console-runner.rs'",
+  "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/dfu-runner.rs --no-dfu 1209:0001'",
 ]

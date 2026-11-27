@@ -955,6 +955,7 @@ dependencies = [
  "embassy-nrf",
  "embassy-usb",
  "embedded-storage",
+ "static_cell",
 ]
 
 [[package]]
