@@ -9,6 +9,8 @@ target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
+# USB serial port for `cargo console` / `cargo dfu`, or set by environment variable.
+SERIAL_PORT = { value = "COM7", force = false }
 
 [alias]
 attach = [
@@ -17,9 +19,19 @@ attach = [
   "target.thumbv7em-none-eabihf.runner = 'probe-rs attach --chip nRF52840_xxAA --speed 16000'",
 ]
 # flash over USB DFU instead of SWD: `cargo dfu` (see the README)
+# built without defmt-rtt, so defmt logs go over the USB log port (src/usb_log.rs)
 # 1209:0001 must match USB_VID/USB_PID in firmware-common
 dfu = [
   "run",
+  "--no-default-features",
   "--config",
   "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/dfu-runner.rs 1209:0001'",
+]
+# attach the USB log console without flashing, the USB counterpart of `cargo attach`
+# built like `cargo dfu`, so the ELF matches what it flashed
+console = [
+  "run",
+  "--no-default-features",
+  "--config",
+  "target.thumbv7em-none-eabihf.runner = 'rust-script ./.cargo/dfu-runner.rs --no-dfu 1209:0001'",
 ]

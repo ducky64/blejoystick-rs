@@ -21,9 +21,10 @@ use embassy_sync::watch;
 use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState};
+use embassy_futures::join::join;
 use firmware_common::{
-    dfu_attributes, linker_partition, msos_winusb, state_buffer, try_wdt, usb_config, DETACH_RESET_DELAY,
-    MSOS_DESC_LEN,
+    dfu_attributes, linker_partition, msos_descriptor, msos_winusb_function, state_buffer, try_wdt, usb_config,
+    DETACH_RESET_DELAY, MSOS_DESC_LEN,
 };
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
@@ -89,7 +90,7 @@ impl embassy_usb::Handler for ConfirmHandler {
     }
 }
 
-/// Runs the USB device (DFU run-time interface only for now) whenever VBUS is present.
+/// Runs the USB device (DFU run-time interface and the USB log port) whenever VBUS is present.
 #[embassy_executor::task]
 pub(crate) async fn usb_task(
     bus: &'static GlobalBus,
@@ -99,9 +100,9 @@ pub(crate) async fn usb_task(
     // VBUS is reported in software by charger_task, since the POWER interrupt belongs to the MPSL
     let driver = Driver::new(usbd, Irqs, &bus.vbus);
 
-    let config = usb_config("blejoystick-rs", None);
+    let config = usb_config("blejoystick-rs", false);
 
-    static CONFIG_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
+    static CONFIG_DESC: ConstStaticCell<[u8; 512]> = ConstStaticCell::new([0; 512]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
     static MSOS_DESC: ConstStaticCell<[u8; MSOS_DESC_LEN]> = ConstStaticCell::new([0; MSOS_DESC_LEN]);
     static CONTROL_BUF: ConstStaticCell<[u8; 64]> = ConstStaticCell::new([0; 64]);
@@ -113,7 +114,9 @@ pub(crate) async fn usb_task(
         MSOS_DESC.take(),
         CONTROL_BUF.take(),
     );
-    msos_winusb(&mut builder);
+    // composite: WinUSB for the DFU function only, so Windows' composite driver binds usbser to the
+    // CDC ACM function
+    msos_descriptor(&mut builder);
 
     static DFU_STATE: StaticCell<DfuState<DetachHandler>> = StaticCell::new();
     let dfu_state = DFU_STATE.init(DfuState::new(
@@ -121,7 +124,9 @@ pub(crate) async fn usb_task(
         dfu_attributes() | DfuAttributes::WILL_DETACH,
         DFU_DETACH_TIMEOUT,
     ));
-    dfu_runtime::usb_dfu(&mut builder, dfu_state, |_| {});
+    dfu_runtime::usb_dfu(&mut builder, dfu_state, |func| msos_winusb_function(func));
+
+    let usb_log = crate::usb_log::add_class(&mut builder);
 
     static CONFIRM_HANDLER: StaticCell<ConfirmHandler> = StaticCell::new();
     builder.handler(CONFIRM_HANDLER.init(ConfirmHandler { bus }));
@@ -129,10 +134,14 @@ pub(crate) async fn usb_task(
     let mut device = builder.build();
 
     let mut usb_powered_rcv = unwrap!(bus.usb_powered.receiver());
-    loop {
-        usb_powered_rcv.changed_and(|powered| *powered).await;
-        run_usb_session(mpsl, &mut device, &mut usb_powered_rcv).await.ok();
-    }
+    let sessions = async {
+        loop {
+            usb_powered_rcv.changed_and(|powered| *powered).await;
+            run_usb_session(mpsl, &mut device, &mut usb_powered_rcv).await.ok();
+        }
+    };
+    // the writer waits while the device is stopped between sessions
+    join(sessions, crate::usb_log::writer(usb_log)).await;
 }
 
 type UsbPoweredReceiver = watch::Receiver<'static, CriticalSectionRawMutex, bool, 2>;

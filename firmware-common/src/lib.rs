@@ -18,10 +18,11 @@ use embassy_boot::AlignedBuffer;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog, WatchdogHandle};
 use embassy_nrf::{peripherals, Peri};
+use embassy_sync::once_lock::OnceLock;
 use embassy_usb::class::dfu::consts::DfuAttributes;
 use embassy_usb::driver::Driver;
 use embassy_usb::msos::{self, windows_version};
-use embassy_usb::Builder;
+use embassy_usb::{Builder, FunctionBuilder};
 use embedded_storage::nor_flash::NorFlash;
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
@@ -38,29 +39,40 @@ pub fn try_wdt(wdt: Peri<'static, peripherals::WDT>) -> Option<WatchdogHandle> {
         .map(|(_, [handle])| handle)
 }
 
-/// USB vendor ID, pid.codes.
 pub const USB_VID: u16 = 0x1209;
-/// USB product ID, pid.codes test PID. TODO allocate a real one.
-pub const USB_PID: u16 = 0x0001;
+pub const USB_PID_MAIN: u16 = 0x0001; // pid.codes test PID, TODO allocate a real one.
+pub const USB_PID_BOOT: u16 = 0x0002; // requires a different one so dfu-util detects mode switch
 
-/// USB serial number of the bootloader's DFU mode. The application has none (for now).
-///
-/// Differs from the application's so the host sees DFU mode as a different device, and
-/// dfu-util sees the bootloader's DFU mode as a different device.
-pub const USB_SERIAL_DFU: &str = "DFU";
-
-/// USB device configuration, the same for the application's DFU run-time interface and the
-/// bootloader's DFU mode, apart from the product and serial number strings.
-pub fn usb_config(
-    product: &'static str,
-    serial_number: Option<&'static str>,
-) -> embassy_usb::Config<'static> {
-    let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
+/// Common USB device configuration across both firmwares
+pub fn usb_config(product: &'static str, is_bootloader: bool) -> embassy_usb::Config<'static> {
+    let mut config = embassy_usb::Config::new(
+        USB_VID,
+        if is_bootloader {
+            USB_PID_BOOT
+        } else {
+            USB_PID_MAIN
+        },
+    );
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
-    config.serial_number = serial_number;
+    config.serial_number = Some(serial_number());
     config.max_power = 100;
     config
+}
+
+/// The chip's 64-bit FICR DEVICEID as hex digits
+fn serial_number() -> &'static str {
+    static SERIAL: OnceLock<[u8; 16]> = OnceLock::new();
+    let serial = SERIAL.get_or_init(|| {
+        let ficr = embassy_nrf::pac::FICR;
+        let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
+        let mut serial = [0; 16];
+        // can't fail: 8 bytes are exactly 16 hex digits
+        hex::encode_to_slice(id.to_be_bytes(), &mut serial).unwrap();
+        serial
+    });
+    // can't fail: only ASCII hex digits
+    core::str::from_utf8(serial).unwrap()
 }
 
 /// bMS_VendorCode: the bRequest of the vendor request Windows uses to fetch the MS OS 2.0 descriptor set.
@@ -76,15 +88,33 @@ pub const MSOS_DESC_LEN: usize = 256;
 ///
 /// The features are device level: Windows only treats a device as composite (usbccgp, which reads
 /// function subsets) when it has more than one interface, and the DFU interface is the only one.
-/// Once another interface is added, these must move into the DFU function's subset (via
-/// `usb_dfu`'s `func_modifier`), or WinUSB would replace the composite driver for the whole device.
+/// For a device with more interfaces, use [`msos_descriptor`] and [`msos_winusb_function`] instead,
+/// or WinUSB would replace the composite driver for the whole device.
 pub fn msos_winusb<'d, D: Driver<'d>>(builder: &mut Builder<'d, D>) {
-    builder.msos_descriptor(windows_version::WIN8_1, MSOS_VENDOR_CODE);
+    msos_descriptor(builder);
     builder.msos_feature(msos::CompatibleIdFeatureDescriptor::new("WINUSB", ""));
-    builder.msos_feature(msos::RegistryPropertyFeatureDescriptor::new(
+    builder.msos_feature(msos_interface_guids());
+}
+
+/// Adds an (empty) MS OS 2.0 descriptor set, for functions to add their features to with
+/// [`msos_winusb_function`].
+pub fn msos_descriptor<'d, D: Driver<'d>>(builder: &mut Builder<'d, D>) {
+    builder.msos_descriptor(windows_version::WIN8_1, MSOS_VENDOR_CODE);
+}
+
+/// Has Windows bind WinUSB to just this function of a composite device (eg, the DFU run-time
+/// interface, via `usb_dfu`'s `func_modifier`), leaving the other functions to their class drivers.
+/// Needs [`msos_descriptor`].
+pub fn msos_winusb_function<'d, D: Driver<'d>>(func: &mut FunctionBuilder<'_, 'd, D>) {
+    func.msos_feature(msos::CompatibleIdFeatureDescriptor::new("WINUSB", ""));
+    func.msos_feature(msos_interface_guids());
+}
+
+fn msos_interface_guids() -> msos::RegistryPropertyFeatureDescriptor<'static> {
+    msos::RegistryPropertyFeatureDescriptor::new(
         "DeviceInterfaceGUIDs",
         msos::PropertyData::RegMultiSz(MSOS_INTERFACE_GUIDS),
-    ));
+    )
 }
 
 /// DFU functional descriptor attributes

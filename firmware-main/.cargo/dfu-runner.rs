@@ -1,13 +1,17 @@
 //! Cargo runner that flashes over USB DFU instead of SWD.
-//! Converts the ELF to a raw binary next to it, then downloads it with dfu-util.
+//! Converts the ELF to a raw binary next to it, downloads it with dfu-util, then attaches the USB
+//! log console with defmt-print (port from `SERIAL_PORT`, see .cargo/config.toml).
+//! With `--no-dfu`, only attaches the console (`cargo console`).
 //! std only, so rust-script builds it once in about a second and caches it.
 //!
-//! Needs on PATH: `rust-objcopy` (cargo-binutils + llvm-tools) and `dfu-util`.
+//! Needs on PATH: `rust-objcopy` (cargo-binutils + llvm-tools), `dfu-util` and `defmt-print`.
 //!
-//! usage: dfu-runner.rs <vid:pid> <elf>
+//! usage: dfu-runner.rs [--no-dfu] <vid:pid> <elf>
 
 use std::path::Path;
 use std::process::{Command, ExitCode};
+use std::thread::sleep;
+use std::time::Duration;
 
 fn run(cmd: &mut Command) -> bool {
     match cmd.status() {
@@ -24,19 +28,33 @@ fn run(cmd: &mut Command) -> bool {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let no_dfu = args.first().is_some_and(|arg| arg == "--no-dfu");
+    if no_dfu {
+        args.remove(0);
+    }
     let [device, elf] = args.as_slice() else {
-        eprintln!("usage: dfu-runner.rs <vid:pid> <elf>");
+        eprintln!("usage: dfu-runner.rs [--no-dfu] <vid:pid> <elf>");
         return ExitCode::FAILURE;
     };
 
     // next to the ELF in target/, so it always matches the build that produced it
     let bin = Path::new(elf).with_extension("bin");
 
-    let ok = run(Command::new("rust-objcopy").arg(elf).args(["-O", "binary"]).arg(&bin))
-        // -E 1: the app detaches immediately, so only wait 1s for the bootloader to enumerate
-        // -R: final USB reset boots the new image
-        && run(Command::new("dfu-util").args(["-d", device, "-E", "1", "-R", "-D"]).arg(&bin));
+    let ok = (no_dfu
+        || run(Command::new("rust-objcopy").arg(elf).args(["-O", "binary"]).arg(&bin))
+            // -E 1: the app detaches immediately, so only wait 1s for the bootloader to enumerate
+            // -R: final USB reset boots the new image
+            && run(Command::new("dfu-util").args(["-d", device, "-E", "1", "-R", "-D"]).arg(&bin))
+            && {
+                sleep(Duration::from_secs(2));  // wait for image to boot
+                true
+            })
+        && run(Command::new("defmt-print").arg("-e").arg(elf).arg("serial"));
 
-    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
