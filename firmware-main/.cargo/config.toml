@@ -9,9 +9,8 @@ target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
-# USB log port for `cargo console` / `cargo dfu` (read by defmt-print). A SERIAL_PORT already set
-# in the environment wins, eg, COM5 on Windows or /dev/serial/by-id/... to pick one board.
-SERIAL_PORT = { value = "/dev/ttyACM0", force = false }
+# USB serial port for `cargo console` / `cargo dfu`, or set by environment variable.
+SERIAL_PORT = { value = "COM7", force = false }
 
 [alias]
 attach = [
