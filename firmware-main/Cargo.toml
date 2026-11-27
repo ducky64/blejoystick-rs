@@ -8,6 +8,11 @@ version = "0.1.0"
 name = "blejoystick-rs"
 path = "./src/main.rs"
 
+[features]
+# defmt logger: RTT (SWD) by default. Without it (`--no-default-features`, as `cargo dfu` and
+# `cargo console` build), defmt logs go over USB CDC ACM instead, see src/usb_log.rs.
+default = ["defmt-rtt"]
+
 [dependencies]
 
 # Cargo.toml block from trouble nrf52 example
@@ -60,10 +65,11 @@ trouble-host = { version = "0.8", default-features = false, features = [
 ] }
 
 defmt = "1.0"
-defmt-rtt = { version = "1.0", features = ["disable-blocking-mode"] }
+defmt-rtt = { version = "1.0", features = ["disable-blocking-mode"], optional = true }
 panic-probe = { version = "1.0", features = ["print-defmt"] }
 
 cortex-m = { version = "0.7.6" }
+critical-section = "1.2"  # for the USB defmt logger, see src/usb_log.rs
 cortex-m-rt = "0.7.0"
 static_cell = "2"
 

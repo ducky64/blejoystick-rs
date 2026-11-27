@@ -21,6 +21,7 @@
 /// 0=USBD,
 /// 0.dp=D+, 24,
 /// 0.dm=D-, 23]
+#[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
@@ -38,6 +39,7 @@ mod imu;
 mod joystick;
 mod prelude;
 mod settings;
+mod usb_log;
 mod util;
 mod expander;
 use crate::leds::{battery_led_task, io_led_task};
