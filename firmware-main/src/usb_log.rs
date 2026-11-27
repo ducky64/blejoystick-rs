@@ -2,22 +2,22 @@
 //!
 //! Without the `defmt-rtt` feature (`--no-default-features`), it carries the defmt stream.
 //! A full pipe drops bytes silently, like defmt-rtt's `disable-blocking-mode`.
-//! The pipe keeps logs from boot until a host opens the port.
+//! The pipe buffers data until a host opens the port.
 //!
 //! With `defmt-rtt`, nothing writes the pipe, and the port only sends [`RTT_NOTICE`] (plain text,
-//! for a terminal), once per USB connection, when the host first reads.
-//!
-//! Host side: `defmt-print -e <elf> serial --path <port>`, or `cargo console` (see the README).
+//! for a terminal), once per USB connection.
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Sender, State};
-use embassy_usb::driver::{Driver, EndpointError};
+use embassy_usb::driver::{Driver, EndpointError, Speed};
 use embassy_usb::Builder;
 use static_cell::StaticCell;
 
-/// CDC ACM bulk endpoint packet size (full speed maximum).
-const MAX_PACKET_SIZE: u16 = 64;
+/// CDC ACM bulk endpoint packet size: 64, the full-speed maximum (the nRF52840 USBD is
+/// full-speed only). embassy-usb's helper is meant for EP0, but full-speed bulk endpoints have the
+/// same 64-byte maximum.
+const MAX_PACKET_SIZE: u16 = Speed::Full.max_packet_size();
 
 /// Largest packet actually sent: one short of [`MAX_PACKET_SIZE`], so every packet is short and
 /// ends its transfer by itself. A full packet would need a zero-length packet (ZLP) after to flush.
