@@ -27,6 +27,7 @@ pub(crate) async fn joystick_task(
     mut trig_gate: Output<'static>,
     mut adc: Saadc<'static, 3>,
     stick_sw: Input<'static>,
+    bumper: Input<'static>,
 ) {
     const CENTER_X: U0F16 = U0F16::lit("0.44");
     const CENTER_Y: U0F16 = U0F16::lit("0.48");
@@ -58,13 +59,14 @@ pub(crate) async fn joystick_task(
             .saturating_div(U0F16::lit("0.2"));
 
         let btn_value = stick_sw.is_low();
+        let bumper_value = bumper.is_low();
 
         debug!(
-            "JX {} {}    JY {} {}    Tr {} {}    Btn {}",
-            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value,
+            "JX {} {}    JY {} {}    Tr {} {}    Btn {}    Bmp {}",
+            x_adc, x_linear, y_adc, y_linear, trig_adc, trig_linear, btn_value, bumper_value,
         );
 
-        if x_linear != 0 || y_linear != 0 || btn_value {
+        if x_linear != 0 || y_linear != 0 || btn_value || bumper_value {
             bus.activity(); // keep alive if joystick is being used
         }
 
@@ -73,6 +75,7 @@ pub(crate) async fn joystick_task(
             y: y_linear,
             trig: I1F15::from_num(trig_linear),
             btn: btn_value,
+            bumper: bumper_value,
         };
         josytick_state_sender.send(joystick_state);
 

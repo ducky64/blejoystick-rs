@@ -41,6 +41,7 @@ mod prelude;
 mod settings;
 mod usb_log;
 mod util;
+mod via;
 mod expander;
 use crate::leds::{battery_led_task, io_led_task};
 use crate::battery::{battery_task, charger_task, power_task};
@@ -176,7 +177,7 @@ async fn main(spawner: Spawner) {
     let stick_gate = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
     let trig_gate = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
 
-    let _bumper = Input::new(p.P0_31, Pull::Up);
+    let bumper = Input::new(p.P0_31, Pull::Up);
     let stick_sw = Input::new(p.P0_05, Pull::Up);
 
     let x_pin = ChannelConfig::single_ended(p.P0_28.reborrow());
@@ -184,7 +185,7 @@ async fn main(spawner: Spawner) {
     let trig_pin = ChannelConfig::single_ended(p.P0_03.reborrow());
     let adc = Saadc::new(p.SAADC, Irqs, Config::default(), [x_pin, y_pin, trig_pin]);
     spawner.spawn(unwrap!(joystick_task(
-        bus, stick_gate, trig_gate, adc, stick_sw
+        bus, stick_gate, trig_gate, adc, stick_sw, bumper
     )));
 
     // initialize BLE - black magic from trouble example
