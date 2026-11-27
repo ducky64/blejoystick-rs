@@ -19,6 +19,10 @@ use static_cell::StaticCell;
 /// CDC ACM bulk endpoint packet size (full speed maximum).
 const MAX_PACKET_SIZE: u16 = 64;
 
+/// Largest packet actually sent: one short of [`MAX_PACKET_SIZE`], so every packet is short and
+/// ends its transfer by itself. A full packet would need a zero-length packet (ZLP) after to flush.
+const SEND_SIZE: usize = MAX_PACKET_SIZE as usize - 1;
+
 /// Encoded defmt frames waiting for the host.
 static PIPE: Pipe<CriticalSectionRawMutex, 4096> = Pipe::new();
 
@@ -122,22 +126,14 @@ pub(crate) async fn writer<D: Driver<'static>>(log: UsbLog<D>) -> ! {
 /// Streams the pipe to the host until the endpoint is disabled.
 async fn stream<D: Driver<'static>>(sender: &mut Sender<'static, D>) -> Result<(), EndpointError> {
     if cfg!(feature = "defmt-rtt") {
-        for chunk in RTT_NOTICE.chunks(MAX_PACKET_SIZE as usize) {
+        for chunk in RTT_NOTICE.chunks(SEND_SIZE) {
             sender.write_packet(chunk).await?;
-        }
-        if RTT_NOTICE.len() % MAX_PACKET_SIZE as usize == 0 {
-            sender.write_packet(&[]).await?;
         }
     }
 
-    let mut buf = [0u8; MAX_PACKET_SIZE as usize];
+    let mut buf = [0u8; SEND_SIZE];
     loop {
         let n = PIPE.read(&mut buf).await;
         sender.write_packet(&buf[..n]).await?;
-        // a full packet doesn't end the transfer, so the host may hold it until a short one:
-        // send a zero-length packet if there's nothing more to send right now
-        if n == buf.len() && PIPE.is_empty() {
-            sender.write_packet(&[]).await?;
-        }
     }
 }
