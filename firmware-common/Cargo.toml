@@ -12,4 +12,5 @@ embassy-boot = { version = "0.7", default-features = false }
 embassy-embedded-hal = { version = "0.6", default-features = false }
 embassy-usb = { version = "0.6", default-features = false }
 embedded-storage = "0.3"
-static_cell = "2"
+embassy-sync = "0.8"
+hex = { version = "0.4", default-features = false }

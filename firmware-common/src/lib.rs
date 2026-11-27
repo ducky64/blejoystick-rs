@@ -23,7 +23,7 @@ use embassy_usb::driver::Driver;
 use embassy_usb::msos::{self, windows_version};
 use embassy_usb::{Builder, FunctionBuilder};
 use embedded_storage::nor_flash::NorFlash;
-use static_cell::ConstStaticCell;
+use embassy_sync::once_lock::OnceLock;
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
 /// bootloader's carries into the application. `None` if it's running with a different
@@ -55,29 +55,32 @@ pub const USB_DEVICE_RELEASE_APP: u16 = 0x0011;
 /// USB device configuration, the same for the application and the bootloader's DFU mode, apart
 /// from the product string and the bcdDevice.
 ///
-/// The serial number is the chip's 64-bit FICR DEVICEID as 16 uppercase hex digits: unique per
-/// chip, so the host can tell boards (and their ports) apart, and the same for the bootloader and
-/// the application.
-///
-/// Call once: panics if called again, since the serial number's storage is a static.
+/// The serial number is [`serial_number`].
 pub fn usb_config(product: &'static str, device_release: u16) -> embassy_usb::Config<'static> {
-    static SERIAL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
-    let serial = SERIAL.take();
-    let ficr = embassy_nrf::pac::FICR;
-    let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
-    for (i, digit) in serial.iter_mut().enumerate() {
-        let nibble = (id >> (60 - 4 * i)) & 0xF;
-        *digit = b"0123456789ABCDEF"[nibble as usize];
-    }
-
     let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
     config.device_release = device_release;
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
-    // only ASCII hex digits
-    config.serial_number = Some(core::str::from_utf8(serial).unwrap());
+    config.serial_number = Some(serial_number());
     config.max_power = 100;
     config
+}
+
+/// The chip's 64-bit FICR DEVICEID as 16 lowercase hex digits: unique per chip, so the host can
+/// tell boards (and their ports) apart, and the same for the bootloader and the application.
+/// Computed on the first call.
+fn serial_number() -> &'static str {
+    static SERIAL: OnceLock<[u8; 16]> = OnceLock::new();
+    let serial = SERIAL.get_or_init(|| {
+        let ficr = embassy_nrf::pac::FICR;
+        let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
+        let mut serial = [0; 16];
+        // can't fail: 8 bytes are exactly 16 hex digits
+        hex::encode_to_slice(id.to_be_bytes(), &mut serial).unwrap();
+        serial
+    });
+    // can't fail: only ASCII hex digits
+    core::str::from_utf8(serial).unwrap()
 }
 
 /// bMS_VendorCode: the bRequest of the vendor request Windows uses to fetch the MS OS 2.0 descriptor set.
