@@ -60,18 +60,21 @@ pub fn usb_config(product: &'static str, is_bootloader: bool) -> embassy_usb::Co
     config
 }
 
-/// The chip's 64-bit FICR DEVICEID as hex digits
+/// Prefix so Vial recognizes the device
+const VIAL_SERIAL_MARKER: &[u8; 14] = b"vial:f64c2b3c:";
+
 fn serial_number() -> &'static str {
-    static SERIAL: OnceLock<[u8; 16]> = OnceLock::new();
+    static SERIAL: OnceLock<[u8; 30]> = OnceLock::new();
     let serial = SERIAL.get_or_init(|| {
         let ficr = embassy_nrf::pac::FICR;
         let id = (u64::from(ficr.deviceid(1).read()) << 32) | u64::from(ficr.deviceid(0).read());
-        let mut serial = [0; 16];
+        let mut serial = [0; 30];
+        serial[..14].copy_from_slice(VIAL_SERIAL_MARKER);
         // can't fail: 8 bytes are exactly 16 hex digits
-        hex::encode_to_slice(id.to_be_bytes(), &mut serial).unwrap();
+        hex::encode_to_slice(id.to_be_bytes(), &mut serial[14..]).unwrap();
         serial
     });
-    // can't fail: only ASCII hex digits
+    // can't fail: only ASCII
     core::str::from_utf8(serial).unwrap()
 }
 

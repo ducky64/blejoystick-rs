@@ -83,7 +83,6 @@ ssmarshal = { version = "1.0", default-features = false }                  # for
 
 fixed = { version = "1.30.0", features = ["defmt"] }
 
-# persistent settings (bonding info), see src/settings.rs
 # sequential-storage is pinned to 7.x to match embedded-nvm-settings 0.1.
 embedded-nvm-settings = { version = "0.1", features = [
     "sequential-storage",
@@ -108,7 +107,11 @@ embassy-embedded-hal = "0.6.0"
 
 # bootloader / USB DFU
 embassy-boot = { version = "0.7", features = ["defmt"] }
-embassy-usb = { version = "0.6", features = ["defmt"] }
+embassy-usb = { version = "0.6", features = [
+    "defmt",
+    "max-interface-count-8",
+    "max-handler-count-8",
+] }
 embassy-usb-dfu = { version = "0.3", features = [
     "application",
     "cortex-m",
@@ -128,9 +131,13 @@ lsm6ds3trc = { version = "0.1", features = ["defmt"] }
 smart-leds = "0.4.0"
 
 # application
-logic = { path = "../logic" }
+logic = { path = "../logic", features = ["defmt"] }
 firmware-common = { path = "../firmware-common" }
 micromath = "2.1"
+
+[build-dependencies]
+serde_json = "1" # compress vial.json
+xz2 = "0.1"
 
 [profile.dev]
 # Rust debug is too slow.
