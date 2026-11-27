@@ -39,19 +39,20 @@ pub fn try_wdt(wdt: Peri<'static, peripherals::WDT>) -> Option<WatchdogHandle> {
         .map(|(_, [handle])| handle)
 }
 
-/// USB vendor ID, pid.codes.
 pub const USB_VID: u16 = 0x1209;
-/// USB product ID, pid.codes test PID. TODO allocate a real one.
-pub const USB_PID: u16 = 0x0001;
-
-/// bcdDevice to differentiate the bootloader and application
-pub const USB_DEVICE_RELEASE_BOOTLOADER: u16 = 0x0010;
-pub const USB_DEVICE_RELEASE_APP: u16 = 0x0011;
+pub const USB_PID_MAIN: u16 = 0x0001; // pid.codes test PID, TODO allocate a real one.
+pub const USB_PID_BOOT: u16 = 0x0002; // requires a different one so dfu-util detects mode switch
 
 /// Common USB device configuration across both firmwares
-pub fn usb_config(product: &'static str, device_release: u16) -> embassy_usb::Config<'static> {
-    let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
-    config.device_release = device_release;
+pub fn usb_config(product: &'static str, is_bootloader: bool) -> embassy_usb::Config<'static> {
+    let mut config = embassy_usb::Config::new(
+        USB_VID,
+        if is_bootloader {
+            USB_PID_BOOT
+        } else {
+            USB_PID_MAIN
+        },
+    );
     config.manufacturer = Some("blejoystick-rs");
     config.product = Some(product);
     config.serial_number = Some(serial_number());

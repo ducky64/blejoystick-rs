@@ -24,7 +24,7 @@ use embassy_usb_dfu::application::{self as dfu_runtime, DfuAttributes, DfuState}
 use embassy_futures::join::join;
 use firmware_common::{
     dfu_attributes, linker_partition, msos_descriptor, msos_winusb_function, state_buffer, try_wdt, usb_config,
-    DETACH_RESET_DELAY, MSOS_DESC_LEN, USB_DEVICE_RELEASE_APP,
+    DETACH_RESET_DELAY, MSOS_DESC_LEN,
 };
 use nrf_sdc::mpsl::{self, Hfclk, MultiprotocolServiceLayer};
 use static_cell::{ConstStaticCell, StaticCell};
@@ -100,7 +100,7 @@ pub(crate) async fn usb_task(
     // VBUS is reported in software by charger_task, since the POWER interrupt belongs to the MPSL
     let driver = Driver::new(usbd, Irqs, &bus.vbus);
 
-    let config = usb_config("blejoystick-rs", USB_DEVICE_RELEASE_APP);
+    let config = usb_config("blejoystick-rs", false);
 
     static CONFIG_DESC: ConstStaticCell<[u8; 512]> = ConstStaticCell::new([0; 512]);
     static BOS_DESC: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0; 256]);
