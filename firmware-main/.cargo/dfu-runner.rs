@@ -13,9 +13,6 @@ use std::process::{Command, ExitCode};
 use std::thread::sleep;
 use std::time::Duration;
 
-/// After dfu-util's final reset, how long the new image takes to boot and enumerate its USB log port.
-const ENUMERATE_DELAY: Duration = Duration::from_secs(2);
-
 fn run(cmd: &mut Command) -> bool {
     match cmd.status() {
         Ok(status) if status.success() => true,
@@ -50,10 +47,14 @@ fn main() -> ExitCode {
             // -R: final USB reset boots the new image
             && run(Command::new("dfu-util").args(["-d", device, "-E", "1", "-R", "-D"]).arg(&bin))
             && {
-                sleep(ENUMERATE_DELAY);
+                sleep(Duration::from_secs(2));  // wait for image to boot
                 true
             })
         && run(Command::new("defmt-print").arg("-e").arg(elf).arg("serial"));
 
-    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

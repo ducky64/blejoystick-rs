@@ -9,8 +9,8 @@ name = "blejoystick-rs"
 path = "./src/main.rs"
 
 [features]
-# defmt logger: RTT (SWD) by default. Without it (`--no-default-features`, as `cargo dfu` and
-# `cargo console` build), defmt logs go over USB CDC ACM instead, see src/usb_log.rs.
+# defmt logger: RTT (SWD) by default
+# use `--no-default-features` (as `cargo dfu` does) to log to USB instead.
 default = ["defmt-rtt"]
 
 [dependencies]
@@ -65,11 +65,13 @@ trouble-host = { version = "0.8", default-features = false, features = [
 ] }
 
 defmt = "1.0"
-defmt-rtt = { version = "1.0", features = ["disable-blocking-mode"], optional = true }
+defmt-rtt = { version = "1.0", features = [
+    "disable-blocking-mode",
+], optional = true }
 panic-probe = { version = "1.0", features = ["print-defmt"] }
 
 cortex-m = { version = "0.7.6" }
-critical-section = "1.2"  # for the USB defmt logger, see src/usb_log.rs
+critical-section = "1.2"         # for the USB defmt logger, see src/usb_log.rs
 cortex-m-rt = "0.7.0"
 static_cell = "2"
 
@@ -89,7 +91,9 @@ embedded-nvm-settings = { version = "0.1", features = [
     "defmt",
 ] }
 versioned-postcard = { version = "0.1", features = ["defmt", "max-size"] }
-postcard = { version = "1.1", default-features = false, features = ["experimental-derive"] }
+postcard = { version = "1.1", default-features = false, features = [
+    "experimental-derive",
+] }
 tinyvec = { version = "1.10", features = ["serde", "defmt", "rustc_1_55"] }
 sequential-storage = { version = "7.1", features = [
     "defmt",

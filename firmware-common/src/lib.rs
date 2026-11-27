@@ -18,12 +18,12 @@ use embassy_boot::AlignedBuffer;
 use embassy_nrf::nvmc::Nvmc;
 use embassy_nrf::wdt::{self, HaltConfig, SleepConfig, Watchdog, WatchdogHandle};
 use embassy_nrf::{peripherals, Peri};
+use embassy_sync::once_lock::OnceLock;
 use embassy_usb::class::dfu::consts::DfuAttributes;
 use embassy_usb::driver::Driver;
 use embassy_usb::msos::{self, windows_version};
 use embassy_usb::{Builder, FunctionBuilder};
 use embedded_storage::nor_flash::NorFlash;
-use embassy_sync::once_lock::OnceLock;
 
 /// Starts the watchdog, or takes it over if it's already running: it survives soft resets, so the
 /// bootloader's carries into the application. `None` if it's running with a different
@@ -44,18 +44,11 @@ pub const USB_VID: u16 = 0x1209;
 /// USB product ID, pid.codes test PID. TODO allocate a real one.
 pub const USB_PID: u16 = 0x0001;
 
-/// bcdDevice of the bootloader's DFU mode (DFU interface only, embassy-usb's default).
-///
-/// The bootloader and the application share VID/PID and serial number; this tells them apart.
+/// bcdDevice to differentiate the bootloader and application
 pub const USB_DEVICE_RELEASE_BOOTLOADER: u16 = 0x0010;
-
-/// bcdDevice of the application (composite: DFU run-time interface and the USB log port).
 pub const USB_DEVICE_RELEASE_APP: u16 = 0x0011;
 
-/// USB device configuration, the same for the application and the bootloader's DFU mode, apart
-/// from the product string and the bcdDevice.
-///
-/// The serial number is [`serial_number`].
+/// Common USB device configuration across both firmwares
 pub fn usb_config(product: &'static str, device_release: u16) -> embassy_usb::Config<'static> {
     let mut config = embassy_usb::Config::new(USB_VID, USB_PID);
     config.device_release = device_release;
@@ -66,9 +59,7 @@ pub fn usb_config(product: &'static str, device_release: u16) -> embassy_usb::Co
     config
 }
 
-/// The chip's 64-bit FICR DEVICEID as 16 lowercase hex digits: unique per chip, so the host can
-/// tell boards (and their ports) apart, and the same for the bootloader and the application.
-/// Computed on the first call.
+/// The chip's 64-bit FICR DEVICEID as hex digits
 fn serial_number() -> &'static str {
     static SERIAL: OnceLock<[u8; 16]> = OnceLock::new();
     let serial = SERIAL.get_or_init(|| {
