@@ -132,12 +132,14 @@ smart-leds = "0.4.0"
 
 # application
 logic = { path = "../logic", features = ["defmt"] }
+vial-device = { path = "../vial-device", features = ["defmt"] }
 firmware-common = { path = "../firmware-common" }
 micromath = "2.1"
 
 [build-dependencies]
-serde_json = "1" # compress vial.json
-xz2 = "0.1"
+vial-device = { path = "../vial-device", features = [
+    "build",
+] } # to generate compressed vial.json
 
 [profile.dev]
 # Rust debug is too slow.

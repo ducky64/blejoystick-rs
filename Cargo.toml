@@ -1,0 +1,5 @@
+[workspace]
+# host-side workspace, excluding firmware crates, which should be built in their own directory
+resolver = "2"
+members = ["logic", "vial-device"]
+exclude = ["firmware-main", "firmware-bootloader", "firmware-common", "firmware-expander"]

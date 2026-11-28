@@ -1,0 +1,3 @@
+[alias]
+# all host-side tests
+test-all = ["test", "--workspace", "--features", "vial-device/build"]

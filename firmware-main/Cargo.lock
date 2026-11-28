@@ -208,7 +208,6 @@ dependencies = [
  "rand_core 0.6.4",
  "sequential-storage",
  "serde",
- "serde_json",
  "smart-leds",
  "ssmarshal",
  "static_cell",
@@ -216,7 +215,7 @@ dependencies = [
  "trouble-host",
  "usbd-hid",
  "versioned-postcard",
- "xz2",
+ "vial-device",
 ]
 
 [[package]]
@@ -1494,6 +1493,7 @@ dependencies = [
  "postcard",
  "rmk-types",
  "serde",
+ "vial-device",
 ]
 
 [[package]]
@@ -2713,6 +2713,16 @@ dependencies = [
  "defmt 1.0.1",
  "postcard",
  "serde",
+]
+
+[[package]]
+name = "vial-device"
+version = "0.1.0"
+dependencies = [
+ "defmt 1.0.1",
+ "rmk-types",
+ "serde_json",
+ "xz2",
 ]
 
 [[package]]

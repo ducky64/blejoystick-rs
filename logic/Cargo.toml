@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.86"
 
 [features]
-defmt = ["dep:defmt", "rmk-types/defmt"]
+defmt = ["dep:defmt", "rmk-types/defmt", "vial-device/defmt"]
 
 [dependencies]
 fixed = "1.30.0"
@@ -15,4 +15,5 @@ postcard = { version = "1.1", default-features = false, features = [
 ] }
 defmt = { version = "1.0", optional = true }
 
-rmk-types = { version = "0.4", default-features = false } # for VIAL definitions
+rmk-types = { version = "0.4", default-features = false } # QMK keycodes
+vial-device = { path = "../vial-device" }
