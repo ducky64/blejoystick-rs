@@ -9,9 +9,9 @@
 //! new memory settings.
 
 use std::env;
-use std::fs::{self, File};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 
 fn main() {
     // Put `memory.x` in our output directory and ensure it's
@@ -33,22 +33,6 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tlink.x");
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
-    vial_definition(out);
-}
-
-/// Minify and LZMA `vial.json` into `$OUT_DIR/vial.json.lzma`
-fn vial_definition(out: &Path) {
-    println!("cargo:rerun-if-changed=vial.json");
-    let json = fs::read_to_string("vial.json").expect("failed to read vial.json");
-    let value: serde_json::Value =
-        serde_json::from_str(&json).expect("vial.json is not valid JSON");
-    let minified = serde_json::to_vec(&value).unwrap();
-
-    let options = xz2::stream::LzmaOptions::new_preset(9).unwrap();
-    let stream = xz2::stream::Stream::new_lzma_encoder(&options).unwrap();
-    let mut compressed = Vec::new();
-    xz2::read::XzEncoder::new_stream(&minified[..], stream)
-        .read_to_end(&mut compressed)
-        .unwrap();
-    fs::write(out.join("vial.json.lzma"), compressed).unwrap();
+    // Vial keyboard definition, served by src/via.rs
+    vial_device::build::compress_definition_file("vial.json", "vial.json.lzma");
 }
