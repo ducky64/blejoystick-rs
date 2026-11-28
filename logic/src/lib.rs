@@ -1,5 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 
+pub mod input;
+pub mod vial;
+
 use fixed::types::{I16F16, I1F15, U0F16};
 
 pub fn scale_bipolar(adc: U0F16, center: U0F16, fullscale: U0F16, deadzone: U0F16) -> I1F15 {
